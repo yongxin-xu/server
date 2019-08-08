@@ -298,6 +298,8 @@ Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
 @param[out]	err		DB_SUCCESS or DB_DECRYPTION_FAILED
+@param[out]	init_crypt	Initialize the crypt data for
+				the space
 @return position on log buffer */
 UNIV_INTERN
 byte*
@@ -305,7 +307,8 @@ fil_parse_write_crypt_data(
 	byte*			ptr,
 	const byte*		end_ptr,
 	const buf_block_t*	block,
-	dberr_t*		err)
+	dberr_t*		err,
+	bool*			init_crypt)
 	MY_ATTRIBUTE((warn_unused_result));
 
 /** Encrypt a buffer.

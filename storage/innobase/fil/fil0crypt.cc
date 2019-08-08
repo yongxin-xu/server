@@ -423,6 +423,8 @@ Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
 @param[in]	ptr		Log entry start
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
+@param[out]	init_crypt	Initialize the crypt_data
+				for the space
 @return position on log buffer */
 UNIV_INTERN
 byte*
@@ -430,7 +432,8 @@ fil_parse_write_crypt_data(
 	byte*			ptr,
 	const byte*		end_ptr,
 	const buf_block_t*	block,
-	dberr_t*		err)
+	dberr_t*		err,
+	bool*			init_crypt)
 {
 	/* check that redo log entry is complete */
 	uint entry_size =
@@ -481,6 +484,7 @@ fil_parse_write_crypt_data(
 	fil_space_t* space = fil_space_get_by_id(space_id);
 
 	if (!space) {
+		*init_crypt = false;
 		mutex_exit(&fil_system->mutex);
 		return ptr + len;
 	}
@@ -502,6 +506,7 @@ fil_parse_write_crypt_data(
 		space->crypt_data = crypt_data;
 	}
 
+	*init_crypt = false;
 	mutex_exit(&fil_system->mutex);
 
 	if (crypt_data->should_encrypt() && !crypt_data->is_key_found()) {

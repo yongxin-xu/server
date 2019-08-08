@@ -49,6 +49,13 @@ dberr_t
 recv_find_max_checkpoint(ulint* max_field)
 	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
+/** Ignore the page because key version doesn't exist in page 0 and it is
+present in the given page id.
+@param[in]	page_id		Given page id is to be ignored
+@return ignore the page to check corruption */
+bool
+recv_recover_ignore_crypt_page(const page_id_t page_id);
+
 /** Reduces recv_sys->n_addrs for the corrupted page.
 This function should called when srv_force_recovery > 0.
 @param[in]	page_id page id of the corrupted page */

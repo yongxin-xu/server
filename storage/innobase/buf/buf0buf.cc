@@ -6068,6 +6068,14 @@ buf_page_io_complete(buf_page_t* bpage, bool dblwr, bool evict)
 
 		} else if (read_space_id == 0 && read_page_no == 0) {
 			/* This is likely an uninitialized page. */
+		} else if (key_version != 0 && !space->crypt_data
+			   && read_page_no != 0
+			   && recv_recover_ignore_crypt_page(bpage->id)) {
+			/* Page is encrypted but space->crypt_data
+			is not yet updated during recovery */
+			buf_corrupt_page_release(bpage, space);
+			fil_space_release_for_io(space);
+			return DB_SUCCESS;
 		} else if ((bpage->id.space() != TRX_SYS_SPACE
 			    && bpage->id.space() != read_space_id)
 			   || bpage->id.page_no() != read_page_no) {

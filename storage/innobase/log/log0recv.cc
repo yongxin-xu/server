@@ -182,6 +182,13 @@ typedef std::map<
 
 static recv_spaces_t	recv_spaces;
 
+/** Store the list of tablespace ids which was failed to initialize
+crypt data while parsing MLOG_FILE_WRITE_CRYPT_DATA. */
+static std::set<ulint>	recv_mlog_crypt_ids;
+
+/** Store the page ids for crypt_data mismatch happened. */
+static std::set<page_id_t> recv_ignore_pages;
+
 /** States of recv_addr_t */
 enum recv_addr_state {
 	/** not yet processed */
@@ -1829,12 +1836,20 @@ parse_log:
 		}
 		break;
 	case MLOG_FILE_WRITE_CRYPT_DATA:
-		dberr_t err;
-		ptr = const_cast<byte*>(fil_parse_write_crypt_data(ptr, end_ptr, block, &err));
+		dberr_t	err;
+		bool	init_crypt;
+		ptr = const_cast<byte*>(fil_parse_write_crypt_data(
+					ptr, end_ptr, block, &err,
+					&init_crypt));
 
 		if (err != DB_SUCCESS) {
 			recv_sys->found_corrupt_log = TRUE;
 		}
+
+		if (!init_crypt) {
+			recv_mlog_crypt_ids.insert(space_id);
+		}
+
 		break;
 	default:
 		ptr = NULL;
@@ -2212,6 +2227,27 @@ skip_log:
 	}
 }
 
+/** Ignore the page because key version doesn't exist in page 0 and it is
+present in the given page id.
+@param[in]	page_id		Given page id is to be ignored
+@return ignore the page to check corruption */
+bool recv_recover_ignore_crypt_page(const page_id_t page_id)
+{
+	if (!recv_recovery_is_on()) {
+		return false;
+	}
+
+	mutex_enter(&recv_sys->mutex);
+
+	bool ignore = (recv_mlog_crypt_ids.find(page_id.space())
+		       != recv_mlog_crypt_ids.end());
+
+	recv_ignore_pages.insert(page_id);
+
+	mutex_exit(&recv_sys->mutex);
+	return ignore;
+}
+
 /** Reduces recv_sys->n_addrs for the corrupted page.
 This function should called when srv_force_recovery > 0.
 @param[in]	page_id	page id of the corrupted page */
@@ -2306,6 +2342,47 @@ static void recv_read_in_area(const page_id_t page_id)
 	buf_read_recv_pages(FALSE, page_id.space(), page_nos,
 			    ulint(p - page_nos));
 	mutex_enter(&recv_sys->mutex);
+}
+
+/** Apply the redo log for the ignored pages. */
+static void recv_apply_for_ignored_pages()
+{
+	ut_ad(mutex_own(&recv_sys->mutex));
+
+	for (std::set<page_id_t>::iterator it = recv_ignore_pages.begin();
+	     it != recv_ignore_pages.end(); it++) {
+
+		if (recv_mlog_crypt_ids.find(it->space())
+		    != recv_mlog_crypt_ids.end()) {
+
+			recv_addr_t* recv_addr = recv_get_fil_addr_struct(
+							it->space(), 0);
+
+			if (recv_addr->state != RECV_BEING_PROCESSED
+			    && recv_addr->state != RECV_PROCESSED) {
+				continue;
+			}
+
+			recv_mlog_crypt_ids.erase(it->space());
+		}
+
+		recv_addr_t* recv_addr = recv_get_fil_addr_struct(
+				it->space(), it->page_no());
+		mtr_t	mtr;
+
+		if (recv_addr->state != RECV_BEING_PROCESSED
+		    && recv_addr->state != RECV_PROCESSED) {
+
+			mutex_exit(&recv_sys->mutex);
+			mtr.start();
+			mtr.set_log_mode(MTR_LOG_NONE);
+			buf_page_get_gen(*it, univ_page_size,
+				RW_X_LATCH, NULL, BUF_GET,
+				__FILE__, __LINE__, &mtr, NULL);
+			mtr.commit();
+			mutex_enter(&recv_sys->mutex);
+		}
+	}
 }
 
 /** Apply the hash table of stored log records to persistent data pages.
@@ -2508,6 +2585,10 @@ do_read:
 		os_thread_sleep(500000);
 
 		mutex_enter(&(recv_sys->mutex));
+
+		if (recv_ignore_pages.size()) {
+			recv_apply_for_ignored_pages();
+		}
 	}
 
 	if (!last_batch) {
