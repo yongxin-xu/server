@@ -3454,11 +3454,11 @@ void do_exec(struct st_command *command)
 
     if (command->abort_on_error)
     {
+      dynstr_free(&ds_cmd);
       report_or_die("exec of '%s' failed, error: %d, status: %d, errno: %d\n"
                     "Output from before failure:\n%s\n",
                     ds_cmd.str, error, status, errno,
                     ds_res.str);
-      dynstr_free(&ds_cmd);
       DBUG_VOID_RETURN;
     }
 
@@ -10200,7 +10200,7 @@ void append_replace_regex(char* expr, char *expr_end, struct st_replace_regex* r
     /* Allow variable for the *entire* list of replacements */
     if (*p == '$')
     {
-      const char *v_end;
+      const char *v_end= 0;
       VAR *val= var_get(p, &v_end, 0, 1);
 
       if (val)
