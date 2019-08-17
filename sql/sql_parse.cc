@@ -121,6 +121,12 @@ static bool wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
                               bool is_com_multi,
                               bool is_next_command);
 
+/*
+  Redefine WSREP_DEBUG to not use WSPREG_LOG which uses 1K stack space
+  for each usage (not call)
+*/
+#undef WSREP_DEBUG
+#define WSREP_DEBUG(...) if (wsrep_debug)  sql_print_information(__VA_ARGS__)
 #endif /* WITH_WSREP */
 /**
   @defgroup Runtime_Environment Runtime Environment
@@ -133,6 +139,10 @@ static void sql_kill_user(THD *thd, LEX_USER *user, killed_state state);
 static bool lock_tables_precheck(THD *thd, TABLE_LIST *tables);
 static bool execute_show_status(THD *, TABLE_LIST *);
 static bool check_rename_table(THD *, TABLE_LIST *, TABLE_LIST *);
+static bool generate_incident_event(THD *thd);
+static int  show_create_db(THD *thd, LEX *lex);
+static bool alter_routine(THD *thd, LEX *lex);
+static bool drop_routine(THD *thd, LEX *lex);
 
 const char *any_db="*any*";	// Special symbol for check_access
 
@@ -1303,7 +1313,7 @@ bool do_command(THD *thd)
         command != COM_QUIT)
     {
       my_error(ER_LOCK_DEADLOCK, MYF(0));
-      WSREP_DEBUG("Deadlock error for: %s", thd->query());
+      WSREP_DEBUG("WSREP: Deadlock error for: %s", thd->query());
       thd->reset_killed();
       thd->mysys_var->abort     = 0;
       thd->wsrep_retry_counter  = 0;
@@ -1595,7 +1605,8 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
   if (WSREP(thd) && thd->wsrep_next_trx_id() == WSREP_UNDEFINED_TRX_ID)
   {
     thd->set_wsrep_next_trx_id(thd->query_id);
-    WSREP_DEBUG("assigned new next trx id: %" PRIu64, thd->wsrep_next_trx_id());
+    WSREP_DEBUG("WSREP: assigned new next trx id: %" PRIu64,
+                thd->wsrep_next_trx_id());
   }
 #endif /* WITH_WSREP */
 
@@ -1828,7 +1839,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
                             &parser_state,
                             is_com_multi, is_next_command))
       {
-        WSREP_DEBUG("Deadlock error for: %s", thd->query());
+        WSREP_DEBUG("WSREP: Deadlock error for: %s", thd->query());
         mysql_mutex_lock(&thd->LOCK_thd_data);
         thd->killed               = NOT_KILLED;
         thd->mysys_var->abort     = 0;
@@ -1932,7 +1943,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
                               length, &parser_state,
                               is_com_multi, is_next_command))
         {
-          WSREP_DEBUG("Deadlock error for: %s", thd->query());
+          WSREP_DEBUG("WSREP: Deadlock error for: %s", thd->query());
           mysql_mutex_lock(&thd->LOCK_thd_data);
           thd->killed               = NOT_KILLED;
           thd->mysys_var->abort     = 0;
@@ -2388,7 +2399,7 @@ dispatch_end:
   */
   if (thd->killed == KILL_QUERY)
   {
-    WSREP_DEBUG("THD is killed at dispatch_end");
+    WSREP_DEBUG("WSREP: THD is killed at dispatch_end");
   }
   wsrep_after_command_before_result(thd);
   if (wsrep_current_error(thd) &&
@@ -2873,7 +2884,8 @@ bool sp_process_definer(THD *thd)
   @return FALSE in case of success, TRUE in case of error.
 */
 
-static bool lock_tables_open_and_lock_tables(THD *thd, TABLE_LIST *tables)
+static bool __attribute__ ((noinline))
+lock_tables_open_and_lock_tables(THD *thd, TABLE_LIST *tables)
 {
   Lock_tables_prelocking_strategy lock_tables_prelocking_strategy;
   MDL_deadlock_and_lock_abort_error_handler deadlock_handler;
@@ -3034,7 +3046,8 @@ static bool do_execute_sp(THD *thd, sp_head *sp)
 }
 
 
-static int mysql_create_routine(THD *thd, LEX *lex)
+static int __attribute__ ((noinline))
+mysql_create_routine(THD *thd, LEX *lex)
 {
   DBUG_ASSERT(lex->sphead != 0);
   DBUG_ASSERT(lex->sphead->m_db.str); /* Must be initialized in the parser */
@@ -3710,7 +3723,7 @@ mysql_execute_command(THD *thd)
       thd->mdl_context.release_transactional_locks();
       if (commit_failed)
       {
-        WSREP_DEBUG("implicit commit failed, MDL released: %lld",
+        WSREP_DEBUG("WSREP: implicit commit failed, MDL released: %lld",
                     (longlong) thd->thread_id);
         goto error;
       }
@@ -4443,40 +4456,8 @@ mysql_execute_command(THD *thd)
     break;
   }
   case SQLCOM_REPLACE:
-#ifndef DBUG_OFF
-    if (mysql_bin_log.is_open())
-    {
-      /*
-        Generate an incident log event before writing the real event
-        to the binary log.  We put this event is before the statement
-        since that makes it simpler to check that the statement was
-        not executed on the slave (since incidents usually stop the
-        slave).
-
-        Observe that any row events that are generated will be
-        generated before.
-
-        This is only for testing purposes and will not be present in a
-        release build.
-      */
-
-      Incident incident= INCIDENT_NONE;
-      DBUG_PRINT("debug", ("Just before generate_incident()"));
-      DBUG_EXECUTE_IF("incident_database_resync_on_replace",
-                      incident= INCIDENT_LOST_EVENTS;);
-      if (incident)
-      {
-        Incident_log_event ev(thd, incident);
-        (void) mysql_bin_log.write(&ev);        /* error is ignored */
-        if (mysql_bin_log.rotate_and_purge(true))
-        {
-          res= 1;
-          break;
-        }
-      }
-      DBUG_PRINT("debug", ("Just after generate_incident()"));
-    }
-#endif
+    if ((res= generate_incident_event(thd)))
+      break;
     /* fall through */
   case SQLCOM_INSERT:
   {
@@ -5090,26 +5071,9 @@ mysql_execute_command(THD *thd)
     break;
   }
   case SQLCOM_SHOW_CREATE_DB:
-  {
-    char db_name_buff[NAME_LEN+1];
-    LEX_CSTRING db_name;
-    DBUG_EXECUTE_IF("4x_server_emul",
-                    my_error(ER_UNKNOWN_ERROR, MYF(0)); goto error;);
-
-    db_name.str= db_name_buff;
-    db_name.length= lex->name.length;
-    strmov(db_name_buff, lex->name.str);
-
     WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
-
-    if (check_db_name((LEX_STRING*) &db_name))
-    {
-      my_error(ER_WRONG_DB_NAME, MYF(0), db_name.str);
-      break;
-    }
-    res= mysqld_show_create_db(thd, &db_name, &lex->name, lex->create_info);
+    res= show_create_db(thd, lex);
     break;
-  }
   case SQLCOM_CREATE_EVENT:
   case SQLCOM_ALTER_EVENT:
   #ifdef HAVE_EVENT_SCHEDULER
@@ -5573,9 +5537,11 @@ mysql_execute_command(THD *thd)
     if (trans_begin(thd, lex->start_transaction_opt))
     {
       thd->mdl_context.release_transactional_locks();
-      WSREP_DEBUG("BEGIN failed, MDL released: %lld",
+      WSREP_DEBUG("WSREP: BEGIN failed, MDL released: %lld",
                   (longlong) thd->thread_id);
-      WSREP_DEBUG("stmt_da, sql_errno: %d", (thd->get_stmt_da()->is_error()) ? thd->get_stmt_da()->sql_errno() : 0);
+      WSREP_DEBUG("WSREP: stmt_da, sql_errno: %d",
+                  ((thd->get_stmt_da()->is_error()) ?
+                   thd->get_stmt_da()->sql_errno() : 0));
       goto error;
     }
     my_ok(thd);
@@ -5594,7 +5560,7 @@ mysql_execute_command(THD *thd)
     thd->mdl_context.release_transactional_locks();
     if (commit_failed)
     {
-      WSREP_DEBUG("COMMIT failed, MDL released: %lld",
+      WSREP_DEBUG("WSREP: COMMIT failed, MDL released: %lld",
                   (longlong) thd->thread_id);
       goto error;
     }
@@ -5633,7 +5599,7 @@ mysql_execute_command(THD *thd)
 
     if (rollback_failed)
     {
-      WSREP_DEBUG("rollback failed, MDL released: %lld",
+      WSREP_DEBUG("WSREP: rollback failed, MDL released: %lld",
                   (longlong) thd->thread_id);
       goto error;
     }
@@ -5689,153 +5655,16 @@ mysql_execute_command(THD *thd)
 
   case SQLCOM_ALTER_PROCEDURE:
   case SQLCOM_ALTER_FUNCTION:
-    {
-      int sp_result;
-      const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
-      if (check_routine_access(thd, ALTER_PROC_ACL, &lex->spname->m_db,
-                               &lex->spname->m_name, sph, 0))
-        goto error;
-
-      /*
-        Note that if you implement the capability of ALTER FUNCTION to
-        alter the body of the function, this command should be made to
-        follow the restrictions that log-bin-trust-function-creators=0
-        already puts on CREATE FUNCTION.
-      */
-      /* Conditionally writes to binlog */
-      sp_result= sph->sp_update_routine(thd, lex->spname, &lex->sp_chistics);
-      switch (sp_result)
-      {
-      case SP_OK:
-	my_ok(thd);
-	break;
-      case SP_KEY_NOT_FOUND:
-	my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
-                 sph->type_str(), ErrConvDQName(lex->spname).ptr());
-	goto error;
-      default:
-	my_error(ER_SP_CANT_ALTER, MYF(0),
-                 sph->type_str(), ErrConvDQName(lex->spname).ptr());
-	goto error;
-      }
-      break;
-    }
+    if (alter_routine(thd, lex))
+      goto error;
+    break;
   case SQLCOM_DROP_PROCEDURE:
   case SQLCOM_DROP_FUNCTION:
   case SQLCOM_DROP_PACKAGE:
   case SQLCOM_DROP_PACKAGE_BODY:
-    {
-#ifdef HAVE_DLOPEN
-      if (lex->sql_command == SQLCOM_DROP_FUNCTION &&
-          ! lex->spname->m_explicit_name)
-      {
-        /* DROP FUNCTION <non qualified name> */
-        udf_func *udf = find_udf(lex->spname->m_name.str,
-                                 lex->spname->m_name.length);
-        if (udf)
-        {
-          if (check_access(thd, DELETE_ACL, "mysql", NULL, NULL, 1, 0))
-            goto error;
-
-          if (!(res = mysql_drop_function(thd, &lex->spname->m_name)))
-          {
-            my_ok(thd);
-            break;
-          }
-          my_error(ER_SP_DROP_FAILED, MYF(0),
-                   "FUNCTION (UDF)", lex->spname->m_name.str);
-          goto error;
-        }
-
-        if (lex->spname->m_db.str == NULL)
-        {
-          if (lex->if_exists())
-          {
-            push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
-                                ER_SP_DOES_NOT_EXIST, ER_THD(thd, ER_SP_DOES_NOT_EXIST),
-                                "FUNCTION (UDF)", lex->spname->m_name.str);
-            res= FALSE;
-            my_ok(thd);
-            break;
-          }
-          my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
-                   "FUNCTION (UDF)", lex->spname->m_name.str);
-          goto error;
-        }
-        /* Fall thought to test for a stored function */
-      }
-#endif
-
-      int sp_result;
-      const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
-
-      if (check_routine_access(thd, ALTER_PROC_ACL, &lex->spname->m_db, &lex->spname->m_name,
-                               Sp_handler::handler(lex->sql_command), 0))
-        goto error;
-      WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-
-      /* Conditionally writes to binlog */
-      sp_result= sph->sp_drop_routine(thd, lex->spname);
-
-#ifndef NO_EMBEDDED_ACCESS_CHECKS
-      /*
-        We're going to issue an implicit REVOKE statement so we close all
-        open tables. We have to keep metadata locks as this ensures that
-        this statement is atomic against concurent FLUSH TABLES WITH READ
-        LOCK. Deadlocks which can arise due to fact that this implicit
-        statement takes metadata locks should be detected by a deadlock
-        detector in MDL subsystem and reported as errors.
-
-        No need to commit/rollback statement transaction, it's not started.
-
-        TODO: Long-term we should either ensure that implicit REVOKE statement
-              is written into binary log as a separate statement or make both
-              dropping of routine and implicit REVOKE parts of one fully atomic
-              statement.
-      */
-      DBUG_ASSERT(thd->transaction.stmt.is_empty());
-      close_thread_tables(thd);
-
-      if (sp_result != SP_KEY_NOT_FOUND &&
-          sp_automatic_privileges && !opt_noacl &&
-          sp_revoke_privileges(thd, lex->spname->m_db.str, lex->spname->m_name.str,
-                               Sp_handler::handler(lex->sql_command)))
-      {
-        push_warning(thd, Sql_condition::WARN_LEVEL_WARN,
-                     ER_PROC_AUTO_REVOKE_FAIL,
-                     ER_THD(thd, ER_PROC_AUTO_REVOKE_FAIL));
-        /* If this happens, an error should have been reported. */
-        goto error;
-      }
-#endif
-
-      res= sp_result;
-      switch (sp_result) {
-      case SP_OK:
-	my_ok(thd);
-	break;
-      case SP_KEY_NOT_FOUND:
-	if (lex->if_exists())
-	{
-          res= write_bin_log(thd, TRUE, thd->query(), thd->query_length());
-	  push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
-			      ER_SP_DOES_NOT_EXIST, ER_THD(thd, ER_SP_DOES_NOT_EXIST),
-                              sph->type_str(),
-                              ErrConvDQName(lex->spname).ptr());
-          if (!res)
-            my_ok(thd);
-	  break;
-	}
-	my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
-                 sph->type_str(), ErrConvDQName(lex->spname).ptr());
-	goto error;
-      default:
-	my_error(ER_SP_DROP_FAILED, MYF(0),
-                 sph->type_str(), ErrConvDQName(lex->spname).ptr());
-	goto error;
-      }
-      break;
-    }
+    if (drop_routine(thd, lex))
+      goto error;
+    break;
   case SQLCOM_SHOW_CREATE_PROC:
   case SQLCOM_SHOW_CREATE_FUNC:
   case SQLCOM_SHOW_CREATE_PACKAGE:
@@ -5938,7 +5767,7 @@ mysql_execute_command(THD *thd)
     thd->mdl_context.release_transactional_locks();
     if (commit_failed)
     {
-      WSREP_DEBUG("XA commit failed, MDL released: %lld",
+      WSREP_DEBUG("WSREP: XA commit failed, MDL released: %lld",
                   (longlong) thd->thread_id);
       goto error;
     }
@@ -5956,7 +5785,7 @@ mysql_execute_command(THD *thd)
     thd->mdl_context.release_transactional_locks();
     if (rollback_failed)
     {
-      WSREP_DEBUG("XA rollback failed, MDL released: %lld",
+      WSREP_DEBUG("WSREP: XA rollback failed, MDL released: %lld",
                   (longlong) thd->thread_id);
       goto error;
     }
@@ -6214,7 +6043,7 @@ finish:
       ! thd->in_active_multi_stmt_transaction() &&
       thd->mdl_context.has_transactional_locks())
   {
-    WSREP_DEBUG("Forcing release of transactional locks for thd: %lld",
+    WSREP_DEBUG("WSREP: Forcing release of transactional locks for thd: %lld",
                 (longlong) thd->thread_id);
     thd->mdl_context.release_transactional_locks();
   }
@@ -6358,7 +6187,15 @@ static bool execute_sqlcom_select(THD *thd, TABLE_LIST *all_tables)
 }
 
 
-static bool execute_show_status(THD *thd, TABLE_LIST *all_tables)
+/**
+   SHOW STATUS
+
+   Notes: This is noinline as we don't want to have system_status_var (> 3K)
+   to be on the stack of mysql_execute_command()
+*/
+
+static bool __attribute__ ((noinline))
+execute_show_status(THD *thd, TABLE_LIST *all_tables)
 {
   bool res;
   system_status_var old_status_var= thd->status_var;
@@ -6443,8 +6280,9 @@ static TABLE *find_temporary_table_for_rename(THD *thd,
 }
 
 
-static bool check_rename_table(THD *thd, TABLE_LIST *first_table,
-                               TABLE_LIST *all_tables)
+static bool __attribute__ ((noinline))
+check_rename_table(THD *thd, TABLE_LIST *first_table,
+                   TABLE_LIST *all_tables)
 {
   DBUG_ASSERT(first_table == all_tables && first_table != 0);
   TABLE_LIST *table;
@@ -6483,6 +6321,227 @@ static bool check_rename_table(THD *thd, TABLE_LIST *first_table,
   return 0;
 }
 
+/*
+  Generate an incident log event before writing the real event
+  to the binary log.  We put this event is before the statement
+  since that makes it simpler to check that the statement was
+  not executed on the slave (since incidents usually stop the
+  slave).
+
+  Observe that any row events that are generated will be generated before.
+
+  This is only for testing purposes and will not be present in a release build.
+*/
+
+#ifndef DBUG_OFF
+static bool __attribute__ ((noinline)) generate_incident_event(THD *thd)
+{
+  if (mysql_bin_log.is_open())
+  {
+
+    Incident incident= INCIDENT_NONE;
+    DBUG_PRINT("debug", ("Just before generate_incident()"));
+    DBUG_EXECUTE_IF("incident_database_resync_on_replace",
+                    incident= INCIDENT_LOST_EVENTS;);
+    if (incident)
+    {
+      Incident_log_event ev(thd, incident);
+      (void) mysql_bin_log.write(&ev);        /* error is ignored */
+      if (mysql_bin_log.rotate_and_purge(true))
+        return 1;
+    }
+    DBUG_PRINT("debug", ("Just after generate_incident()"));
+  }
+  return 0;
+}
+#else
+static bool generate_incident_event(THD *thd)
+{
+  return 0;
+}
+#endif
+
+
+static int __attribute__ ((noinline))
+show_create_db(THD *thd, LEX *lex)
+{
+  char db_name_buff[NAME_LEN+1];
+  LEX_CSTRING db_name;
+  DBUG_EXECUTE_IF("4x_server_emul",
+                  my_error(ER_UNKNOWN_ERROR, MYF(0)); return 1;);
+
+  db_name.str= db_name_buff;
+  db_name.length= lex->name.length;
+  strmov(db_name_buff, lex->name.str);
+
+  if (check_db_name((LEX_STRING*) &db_name))
+  {
+    my_error(ER_WRONG_DB_NAME, MYF(0), db_name.str);
+    return 1;
+  }
+  return mysqld_show_create_db(thd, &db_name, &lex->name, lex->create_info);
+}
+
+
+/**
+   Called on SQLCOM_ALTER_PROCEDURE and SQLCOM_ALTER_FUNCTION
+*/
+
+static bool __attribute__ ((noinline))
+alter_routine(THD *thd, LEX *lex)
+{
+  int sp_result;
+  const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
+  if (check_routine_access(thd, ALTER_PROC_ACL, &lex->spname->m_db,
+                           &lex->spname->m_name, sph, 0))
+    return 1;
+  /*
+    Note that if you implement the capability of ALTER FUNCTION to
+    alter the body of the function, this command should be made to
+    follow the restrictions that log-bin-trust-function-creators=0
+    already puts on CREATE FUNCTION.
+  */
+  /* Conditionally writes to binlog */
+  sp_result= sph->sp_update_routine(thd, lex->spname, &lex->sp_chistics);
+  switch (sp_result) {
+  case SP_OK:
+    my_ok(thd);
+    return 0;
+  case SP_KEY_NOT_FOUND:
+    my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
+             sph->type_str(), ErrConvDQName(lex->spname).ptr());
+    return 1;
+  default:
+    my_error(ER_SP_CANT_ALTER, MYF(0),
+             sph->type_str(), ErrConvDQName(lex->spname).ptr());
+    return 1;
+  }
+  return 0;                                     /* purecov: deadcode */
+}
+
+
+static bool __attribute__ ((noinline))
+drop_routine(THD *thd, LEX *lex)
+{
+  int sp_result;
+#ifdef HAVE_DLOPEN
+  if (lex->sql_command == SQLCOM_DROP_FUNCTION &&
+      ! lex->spname->m_explicit_name)
+  {
+    /* DROP FUNCTION <non qualified name> */
+    udf_func *udf = find_udf(lex->spname->m_name.str,
+                             lex->spname->m_name.length);
+    if (udf)
+    {
+      if (check_access(thd, DELETE_ACL, "mysql", NULL, NULL, 1, 0))
+        return 1;
+
+      if (!mysql_drop_function(thd, &lex->spname->m_name))
+      {
+        my_ok(thd);
+        return 0;
+      }
+      my_error(ER_SP_DROP_FAILED, MYF(0),
+               "FUNCTION (UDF)", lex->spname->m_name.str);
+      return 1;
+    }
+
+    if (lex->spname->m_db.str == NULL)
+    {
+      if (lex->if_exists())
+      {
+        push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
+                            ER_SP_DOES_NOT_EXIST,
+                            ER_THD(thd, ER_SP_DOES_NOT_EXIST),
+                            "FUNCTION (UDF)", lex->spname->m_name.str);
+        my_ok(thd);
+        return 0;
+      }
+      my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
+               "FUNCTION (UDF)", lex->spname->m_name.str);
+      return 1;
+    }
+    /* Fall trough to test for a stored function */
+  }
+#endif /* HAVE_DLOPEN */
+
+  const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
+
+  if (check_routine_access(thd, ALTER_PROC_ACL, &lex->spname->m_db,
+                           &lex->spname->m_name,
+                           Sp_handler::handler(lex->sql_command), 0))
+    return 1;
+
+  WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+
+  /* Conditionally writes to binlog */
+  sp_result= sph->sp_drop_routine(thd, lex->spname);
+
+#ifndef NO_EMBEDDED_ACCESS_CHECKS
+  /*
+    We're going to issue an implicit REVOKE statement so we close all
+    open tables. We have to keep metadata locks as this ensures that
+    this statement is atomic against concurent FLUSH TABLES WITH READ
+    LOCK. Deadlocks which can arise due to fact that this implicit
+    statement takes metadata locks should be detected by a deadlock
+    detector in MDL subsystem and reported as errors.
+
+    No need to commit/rollback statement transaction, it's not started.
+
+    TODO: Long-term we should either ensure that implicit REVOKE statement
+    is written into binary log as a separate statement or make both
+    dropping of routine and implicit REVOKE parts of one fully atomic
+    statement.
+  */
+  DBUG_ASSERT(thd->transaction.stmt.is_empty());
+  close_thread_tables(thd);
+
+  if (sp_result != SP_KEY_NOT_FOUND &&
+      sp_automatic_privileges && !opt_noacl &&
+      sp_revoke_privileges(thd, lex->spname->m_db.str, lex->spname->m_name.str,
+                           Sp_handler::handler(lex->sql_command)))
+  {
+    push_warning(thd, Sql_condition::WARN_LEVEL_WARN,
+                 ER_PROC_AUTO_REVOKE_FAIL,
+                 ER_THD(thd, ER_PROC_AUTO_REVOKE_FAIL));
+    /* If this happens, an error should have been reported. */
+    return 1;
+  }
+#endif /* NO_EMBEDDED_ACCESS_CHECKS */
+
+  switch (sp_result) {
+  case SP_OK:
+    my_ok(thd);
+    return 0;
+  case SP_KEY_NOT_FOUND:
+    int res;
+    if (lex->if_exists())
+    {
+      res= write_bin_log(thd, TRUE, thd->query(), thd->query_length());
+      push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
+                          ER_SP_DOES_NOT_EXIST,
+                          ER_THD(thd, ER_SP_DOES_NOT_EXIST),
+                          sph->type_str(),
+                          ErrConvDQName(lex->spname).ptr());
+      if (res)
+        return 1;
+      my_ok(thd);
+      return 0;
+    }
+    my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
+             sph->type_str(), ErrConvDQName(lex->spname).ptr());
+    return 1;
+  default:
+    my_error(ER_SP_DROP_FAILED, MYF(0),
+             sph->type_str(), ErrConvDQName(lex->spname).ptr());
+    return 1;
+  }
+
+#ifdef WITH_WSREP
+wsrep_error_label:
+  return 1;
+#endif
+}
 
 /**
   @brief Compare requested privileges with the privileges acquired from the
@@ -7709,7 +7768,7 @@ static bool wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
          !thd->get_stmt_da()->is_set()) &&
         thd->wsrep_trx().bf_aborted())
     {
-      WSREP_DEBUG("overriding error: %d with DEADLOCK",
+      WSREP_DEBUG("WSREP: overriding error: %d with DEADLOCK",
                   (thd->get_stmt_da()->is_error()) ?
                    thd->get_stmt_da()->sql_errno() : 0);
 
@@ -7733,7 +7792,7 @@ static bool wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
                         "WAIT_FOR wsrep_retry_autocommit_continue";
                       DBUG_ASSERT(!debug_sync_set_action(thd, STRING_WITH_LEN(act)));
                     });
-        WSREP_DEBUG("wsrep retrying AC query: %lu  %s",
+        WSREP_DEBUG("WSREP: wsrep retrying AC query: %lu  %s",
                     thd->wsrep_retry_counter, WSREP_QUERY(thd));
         wsrep_prepare_for_autocommit_retry(thd, rawbuf, length, parser_state);
         if (thd->lex->explain)
@@ -7742,7 +7801,7 @@ static bool wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
       }
       else
       {
-        WSREP_DEBUG("%s, thd: %llu is_AC: %d, retry: %lu - %lu SQL: %s",
+        WSREP_DEBUG("WSREP: %s, thd: %llu is_AC: %d, retry: %lu - %lu SQL: %s",
                     wsrep_thd_transaction_state_str(thd),
                     thd->thread_id,
                     is_autocommit,
@@ -7762,7 +7821,7 @@ static bool wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
 
   if (thd->wsrep_retry_query)
   {
-    WSREP_DEBUG("releasing retry_query: "
+    WSREP_DEBUG("WSREP: releasing retry_query: "
                 "conf %s sent %d kill %d  errno %d SQL %s",
                 wsrep_thd_transaction_state_str(thd),
                 thd->get_stmt_da()->is_sent(),
@@ -8986,7 +9045,7 @@ kill_one_thread(THD *thd, longlong id, killed_state kill_signal, killed_type typ
   uint error= (type == KILL_TYPE_QUERY ? ER_NO_SUCH_QUERY : ER_NO_SUCH_THREAD);
   DBUG_ENTER("kill_one_thread");
   DBUG_PRINT("enter", ("id: %lld  signal: %u", id, (uint) kill_signal));
-  WSREP_DEBUG("kill_one_thread %llu", thd->thread_id);
+  WSREP_DEBUG("WSREP: kill_one_thread %llu", thd->thread_id);
   if (id && (tmp= find_thread_by_id(id, type == KILL_TYPE_QUERY)))
   {
     /*
@@ -9150,8 +9209,8 @@ void sql_kill(THD *thd, longlong id, killed_state state, killed_type type)
 }
 
 
-static
-void sql_kill_user(THD *thd, LEX_USER *user, killed_state state)
+static void __attribute__ ((noinline))
+sql_kill_user(THD *thd, LEX_USER *user, killed_state state)
 {
   uint error;
   ha_rows rows;
