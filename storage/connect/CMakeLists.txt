@@ -333,8 +333,8 @@ IF(CONNECT_WITH_MONGO)
         C:/mongo-c-driver/lib
         D:/mongo-c-driver/lib)
   ENDIF(WIN32)
-  FIND_PACKAGE(libmongoc-1.0 1.7)
-  SET_PACKAGE_PROPERTIES(libmongoc PROPERTIES
+  FIND_PACKAGE(libmongoc-1.0 1.7 QUIET)
+  SET_PACKAGE_PROPERTIES(libmongoc-1.0 PROPERTIES
     DESCRIPTION "A high-performance MongoDB driver for C"
     PURPOSE "Enables support for connections to MongoDB in the CONNECT storage engine"
     TYPE OPTIONAL
@@ -365,10 +365,8 @@ ENDIF(CONNECT_WITH_MONGO)
 OPTION(CONNECT_WITH_REST "Compile CONNECT storage engine with REST support" ON)
 
 IF(CONNECT_WITH_REST)
-  MESSAGE(STATUS "=====> REST support is ON")
-  FIND_PACKAGE(cpprestsdk)
+  FIND_PACKAGE(cpprestsdk QUIET)
   IF (cpprestsdk_FOUND)
-    MESSAGE(STATUS "=====> cpprestsdk found")
 	IF(UNIX)
 #     INCLUDE_DIRECTORIES(${CPPRESTSDK_INCLUDE_DIR})
 #     If needed edit next line to set the path to libcpprest.so
@@ -377,8 +375,6 @@ IF(CONNECT_WITH_REST)
 	ENDIF(UNIX)
     SET(CONNECT_SOURCES ${CONNECT_SOURCES} tabrest.cpp restget.cpp tabrest.h)
     add_definitions(-DREST_SUPPORT)
-  ELSE(NOT cpprestsdk_FOUND)
-    MESSAGE(STATUS "=====> cpprestsdk package not found")
   ENDIF (cpprestsdk_FOUND)
 ENDIF(CONNECT_WITH_REST)
 
