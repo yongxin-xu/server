@@ -1,0 +1,13 @@
+--source include/have_innodb.inc
+SET GLOBAL INNODB_COMPRESSION_ALGORITHM = 2;
+CREATE TABLE t1(f1 int not null)PAGE_COMPRESSED=1 ENGINE=InnoDB;
+INSERT INTO t1 VALUES(1);
+let $restart_parameters=--innodb_checksum_algorithm=full_crc32 --innodb_compression_algorithm=0;
+--source include/restart_mysqld.inc
+INSERT INTO t1 VALUES(2);
+SELECT * FROM t1;
+let $restart_parameters=--innodb_checksum_algorithm=crc32 --innodb_compression_algorithm=3;
+--source include/restart_mysqld.inc
+INSERT INTO t1 VALUES(3);
+SELECT * FROM t1;
+DROP TABLE t1;
