@@ -237,8 +237,7 @@ PageBulk::insert(
 }
 
 /** Mark end of insertion to the page. Scan all records to set page dirs,
-and set page header members.
-Note: we refer to page_copy_rec_list_end_to_created_page. */
+and set page header members. */
 void
 PageBulk::finish()
 {

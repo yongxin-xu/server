@@ -11,6 +11,7 @@
 --source include/not_valgrind.inc
 # This test is slow on buildbot.
 --source include/big_test.inc
+--source include/have_sequence.inc
 
 CREATE TABLE t1(
 	a INT AUTO_INCREMENT PRIMARY KEY,
@@ -32,20 +33,13 @@ let SEARCH_FILE = $MYSQLTEST_VARDIR/tmp/my_restart.err;
 # Create enough rows for the table, so that the change buffer will be
 # used for modifying the secondary index page. There must be multiple
 # index pages, because changes to the root page are never buffered.
-INSERT INTO t1 VALUES(0,'x',1);
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
-INSERT INTO t1 SELECT 0,b,c FROM t1;
+
+# The removed function page_copy_rec_list_end_to_created_page() would create
+# less dense pages than the remaining part of page_copy_rec_list_end().
+# For the INSERT after the DELETE to be buffered, the leftmost page
+# must not be too densely packed.
+SET GLOBAL innodb_limit_optimistic_insert_debug=700;
+INSERT INTO t1 SELECT 0,'x',1 FROM seq_1_to_8192;
 
 BEGIN;
 SELECT b FROM t1 LIMIT 3;
