@@ -280,17 +280,8 @@ struct fts_table_t {
 };
 
 enum	fts_status {
-	BG_THREAD_STOP = 1,	 	/*!< TRUE if the FTS background thread
-					has finished reading the ADDED table,
-					meaning more items can be added to
-					the table. */
-
-	BG_THREAD_READY = 2,		/*!< TRUE if the FTS background thread
-					is ready */
-
-	ADD_THREAD_STARTED = 4,		/*!< TRUE if the FTS add thread
-					has started */
-
+	/* Added the table in the fts_optimize_wq */
+	TABLE_IN_QUEUE = 1,
 	ADDED_TABLE_SYNCED = 8,		/*!< TRUE if the ADDED table record is
 					sync-ed after crash recovery */
 
@@ -306,11 +297,6 @@ struct fts_t {
 					fts_add_wq. */
 	ib_mutex_t		bg_threads_mutex;
 
-	ulint		bg_threads;	/*!< number of background threads
-					accessing this table */
-
-					/*!< TRUE if background threads running
-					should stop themselves */
 	ulint		fts_status;	/*!< Status bit regarding fts
 					running state */
 
@@ -613,28 +599,6 @@ UNIV_INTERN
 void
 fts_startup(void);
 /*==============*/
-
-/******************************************************************//**
-Signal FTS threads to initiate shutdown. */
-UNIV_INTERN
-void
-fts_start_shutdown(
-/*===============*/
-	dict_table_t*	table,			/*!< in: table with FTS
-						indexes */
-	fts_t*		fts);			/*!< in: fts instance to
-						shutdown */
-
-/******************************************************************//**
-Wait for FTS threads to shutdown. */
-UNIV_INTERN
-void
-fts_shutdown(
-/*=========*/
-	dict_table_t*	table,			/*!< in: table with FTS
-						indexes */
-	fts_t*		fts);			/*!< in: fts instance to
-						shutdown */
 
 /******************************************************************//**
 Create an instance of fts_t.
