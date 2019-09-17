@@ -2451,13 +2451,14 @@ Field *Field::clone(MEM_ROOT *root, TABLE *new_table, my_ptrdiff_t diff,
 }
 
 
-Field *Field::clone(MEM_ROOT *root, my_ptrdiff_t diff)
+Field *Field::clone(MEM_ROOT *root, my_ptrdiff_t diff, bool stat_flag)
 {
   Field *tmp;
   if ((tmp= (Field*) memdup_root(root,(char*) this,size_of())))
   {
     tmp->move_field_offset(diff);
   }
+  tmp->is_stat_field= stat_flag;
   return tmp;
 }
 
