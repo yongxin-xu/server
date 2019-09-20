@@ -827,13 +827,7 @@ retry_mdl:
 		unaccessible = true;
 	}
 
-	if (!dict_locked) {
-		mutex_enter(&dict_sys.mutex);
-		table->release();
-		mutex_exit(&dict_sys.mutex);
-	} else {
-		table->release();
-	}
+	table->release();
 
 	if (unaccessible) {
 		return NULL;
