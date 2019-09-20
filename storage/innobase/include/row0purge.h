@@ -197,7 +197,6 @@ public:
 		found_clust = FALSE;
 		rec_type = ULINT_UNDEFINED;
 		cmpl_info = ULINT_UNDEFINED;
-
 		if (!purge_thd) {
 			purge_thd = current_thd;
 		}
@@ -249,6 +248,7 @@ public:
 		close_table();
 		undo_recs = NULL;
 		ut_d(in_progress = false);
+		purge_thd = NULL;
 		mem_heap_empty(heap);
 		return common.parent;
 	}
