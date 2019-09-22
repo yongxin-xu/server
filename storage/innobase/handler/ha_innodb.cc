@@ -13009,35 +13009,6 @@ innobase_rename_table(
 		row_mysql_lock_data_dictionary(trx);
 	}
 
-	dict_table_t*   table = dict_table_open_on_name(
-		norm_from, TRUE, FALSE, DICT_ERR_IGNORE_FK_NOKEY);
-
-	/* Since DICT_BG_YIELD has sleep for 250 milliseconds,
-	Convert lock_wait_timeout unit from second to 250 milliseconds */
-	long int lock_wait_timeout = thd_lock_wait_timeout(trx->mysql_thd) * 4;
-	if (table != NULL) {
-		for (dict_index_t* index = dict_table_get_first_index(table);
-		     index != NULL;
-		     index = dict_table_get_next_index(index)) {
-
-			if (index->type & DICT_FTS) {
-				/* Found */
-				while (index->index_fts_syncing
-					&& !trx_is_interrupted(trx)
-					&& (lock_wait_timeout--) > 0) {
-					DICT_BG_YIELD(trx);
-				}
-			}
-		}
-		dict_table_close(table, TRUE, FALSE);
-	}
-
-	/* FTS sync is in progress. We shall timeout this operation */
-	if (lock_wait_timeout < 0) {
-		error = DB_LOCK_WAIT_TIMEOUT;
-		goto func_exit;
-	}
-
 	error = row_rename_table_for_mysql(norm_from, norm_to, trx, commit,
 					   use_fk);
 
@@ -13089,7 +13060,6 @@ innobase_rename_table(
 		}
 	}
 
-func_exit:
 	if (commit) {
 		row_mysql_unlock_data_dictionary(trx);
 	}
@@ -13274,10 +13244,6 @@ ha_innobase::rename_table(
 		my_error(ER_TABLE_EXISTS_ERROR, MYF(0), to);
 
 		error = DB_ERROR;
-	} else if (error == DB_LOCK_WAIT_TIMEOUT) {
-		my_error(ER_LOCK_WAIT_TIMEOUT, MYF(0), to);
-
-		error = DB_LOCK_WAIT;
 	}
 
 	DBUG_RETURN(convert_error_code_to_mysql(error, 0, NULL));
