@@ -2368,17 +2368,19 @@ fts_optimize_reset_start_time(
 	return(error);
 }
 
-/*********************************************************************//**
-Run OPTIMIZE on the given table by a background thread.
+/** Run OPTIMIZE on the given table by a background thread.
+@param[in]	slot		table to optimize
+@param[in]	fts_op_thread	fts optimize thread
 @return DB_SUCCESS if all OK */
 static MY_ATTRIBUTE((nonnull))
 dberr_t
 fts_optimize_table_bk(
-/*==================*/
-	fts_slot_t*	slot)	/*!< in: table to optimiza */
+	fts_slot_t*	slot,
+	THD*		fts_opt_thread)
 {
 	const time_t now = time(NULL);
 	const ulint interval = ulint(now - slot->last_run);
+	MDL_ticket*	mdl = NULL;
 
 	/* Avoid optimizing tables that were optimized recently. */
 	if (slot->last_run > 0
@@ -2389,7 +2391,8 @@ fts_optimize_table_bk(
 	}
 
 	dict_table_t* table = dict_table_open_on_id(
-		slot->table_id, FALSE, DICT_TABLE_OP_NORMAL);
+		slot->table_id, false, DICT_TABLE_OP_NORMAL,
+		fts_opt_thread, &mdl);
 
 	if (!table) {
 		slot->last_run = now;
@@ -2415,7 +2418,7 @@ fts_optimize_table_bk(
 		error = DB_SUCCESS;
 	}
 
-	dict_table_close(table, FALSE, FALSE);
+	dict_table_close(table, false, false, fts_opt_thread, mdl);
 
 	return(error);
 }
@@ -2785,7 +2788,8 @@ DECLARE_THREAD(fts_optimize_thread)(
 			/* Handle the case of empty slots. */
 			if (slot->table_id) {
 				slot->running = true;
-				fts_optimize_table_bk(slot);
+				fts_optimize_table_bk(
+					slot, fts_opt_thread);
 			}
 
 			/* Wrap around the counter. */
@@ -2802,12 +2806,9 @@ DECLARE_THREAD(fts_optimize_thread)(
 				ib_wqueue_timedwait(
 					wq, FTS_QUEUE_WAIT_IN_USECS));
 
-			/* Timeout ? */
+			/* Timeout happened */
 			if (msg == NULL) {
-				if (fts_is_sync_needed()) {
-					fts_need_sync = true;
-				}
-
+				fts_need_sync = fts_is_sync_needed();
 				continue;
 			}
 
