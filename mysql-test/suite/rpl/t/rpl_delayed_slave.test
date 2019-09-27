@@ -26,13 +26,13 @@
 #
 # ==== Implementation ====
 #
-# We run the slave with 10 seconds lag.
+# We run the slave with 5 seconds lag.
 #
 # In general, to test that a query has not been executed by the slave
 # before this time, we wait until the slave IO thread has received the
 # event, and then 5 seconds more, and check that the table has not
 # been updated.  To test that a query has been executed after this
-# time, we wait 10 seconds more.
+# time, we wait 5 seconds more.
 #
 # To simulate that the slave lags due to slow queries, we invoke a
 # stored function that executes SLEEP if @@gloval.server_id==2. This
@@ -51,7 +51,7 @@
 # The test is inherently timing-sensitive (i.e., contains races) and
 # is likely to fail sporadically on a loaded host.
 #
-# The test takes a long time; it sleeps for around 20*10 seconds.
+# The test takes a long time; it sleeps for around 20*5 seconds.
 
 --source include/big_test.inc
 --source include/not_valgrind.inc
@@ -73,7 +73,7 @@ call mtr.add_suppression("Unsafe statement written to the binary log using state
 #    query has been copied to slave but not yet executed.
 #  - If we execute a query on master and wait $time3 seconds, then the
 #    query has been executed.
---let $time1= 10
+--let $time1= 5
 if (`SELECT '$max_query_execution_time' > 0`) {
   --let $time1= $max_query_execution_time
 }
