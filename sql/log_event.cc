@@ -1040,9 +1040,14 @@ row_log_event_uncompress(const Format_description_log_event *description_event,
 
 uint32 binlog_get_uncompress_len(const char *buf)
 {
-  DBUG_ASSERT((buf[0] & 0xe0) == 0x80);
-  uint32 lenlen = buf[0] & 0x07;
   uint32 len = 0;
+  uint32 lenlen = 0;
+
+  if ((buf == NULL) || ((buf[0] & 0xe0) != 0x80))
+    return len;
+
+  lenlen = buf[0] & 0x07;
+
   switch(lenlen)
   {
   case 1:
@@ -4263,7 +4268,6 @@ code_name(int code)
 #define CHECK_SPACE(PTR,END,CNT)                      \
   do {                                                \
     DBUG_PRINT("info", ("Read %s", code_name(pos[-1]))); \
-    DBUG_ASSERT((PTR) + (CNT) <= (END));              \
     if ((PTR) + (CNT) > (END)) {                      \
       DBUG_PRINT("info", ("query= 0"));               \
       query= 0;                                       \
@@ -6711,6 +6715,10 @@ int Load_log_event::copy_log_event(const char *buf, ulong event_len,
 {
   DBUG_ENTER("Load_log_event::copy_log_event");
   uint data_len;
+
+  if ((int) event_len < body_offset)
+    DBUG_RETURN(1);
+
   char* buf_end = (char*)buf + event_len;
   /* this is the beginning of the post-header */
   const char* data_head = buf + description_event->common_header_len;
@@ -6720,9 +6728,7 @@ int Load_log_event::copy_log_event(const char *buf, ulong event_len,
   table_name_len = (uint)data_head[L_TBL_LEN_OFFSET];
   db_len = (uint)data_head[L_DB_LEN_OFFSET];
   num_fields = uint4korr(data_head + L_NUM_FIELDS_OFFSET);
-	  
-  if ((int) event_len < body_offset)
-    DBUG_RETURN(1);
+
   /*
     Sql_ex.init() on success returns the pointer to the first byte after
     the sql_ex structure, which is the start of field lengths array.
@@ -6731,7 +6737,7 @@ int Load_log_event::copy_log_event(const char *buf, ulong event_len,
                                         buf_end,
                                         (uchar)buf[EVENT_TYPE_OFFSET] != LOAD_EVENT)))
     DBUG_RETURN(1);
-  
+
   data_len = event_len - body_offset;
   if (num_fields > data_len) // simple sanity check against corruption
     DBUG_RETURN(1);
@@ -7271,7 +7277,7 @@ Rotate_log_event::Rotate_log_event(const char* buf, uint event_len,
   // The caller will ensure that event_len is what we have at EVENT_LEN_OFFSET
   uint8 post_header_len= description_event->post_header_len[ROTATE_EVENT-1];
   uint ident_offset;
-  if (event_len < LOG_EVENT_MINIMAL_HEADER_LEN)
+  if (event_len < (uint)(LOG_EVENT_MINIMAL_HEADER_LEN + post_header_len))
     DBUG_VOID_RETURN;
   buf+= LOG_EVENT_MINIMAL_HEADER_LEN;
   pos= post_header_len ? uint8korr(buf + R_POS_OFFSET) : 4;
@@ -8781,6 +8787,12 @@ User_var_log_event(const char* buf, uint event_len,
       we keep the flags set to UNDEF_F.
     */
     size_t bytes_read= (val + val_len) - buf_start;
+    if (bytes_read > event_len)
+    {
+      error= true;
+      goto err;
+    }
+
     if ((data_written - bytes_read) > 0)
     {
       flags= (uint) *(buf + UV_VAL_IS_NULL + UV_VAL_TYPE_SIZE +
@@ -10344,7 +10356,8 @@ Rows_log_event::Rows_log_event(const char *buf, uint event_len,
   uint8 const common_header_len= description_event->common_header_len;
   Log_event_type event_type= (Log_event_type)(uchar)buf[EVENT_TYPE_OFFSET];
   m_type= event_type;
-  
+  m_cols_ai.bitmap= 0;
+
   uint8 const post_header_len= description_event->post_header_len[event_type-1];
 
   DBUG_PRINT("enter",("event_len: %u  common_header_len: %d  "
@@ -10378,7 +10391,15 @@ Rows_log_event::Rows_log_event(const char *buf, uint event_len,
       which includes length bytes
     */
     var_header_len= uint2korr(post_start);
-    assert(var_header_len >= 2);
+    /* Check length and also avoid out of buffer read */
+    if (var_header_len < 2 ||
+        event_len < static_cast<unsigned int>(var_header_len +
+          (post_start - buf)))
+    {
+      m_cols.bitmap= 0;
+      DBUG_VOID_RETURN;
+    }
+
     var_header_len-= 2;
 
     /* Iterate over var-len header, extracting 'chunks' */
@@ -11998,6 +12019,11 @@ Table_map_log_event::Table_map_log_event(const char *buf, uint event_len,
                      (ulong) m_tbllen, (long) (ptr_tbllen-(const uchar*)vpart),
                      m_colcnt, (long) (ptr_colcnt-(const uchar*)vpart)));
 
+  bytes_read= (unsigned int) (ptr_after_colcnt - (unsigned char *)buf);
+  /* Avoid reading out of buffer */
+  if (event_len <= bytes_read || event_len - bytes_read < m_colcnt)
+    DBUG_VOID_RETURN;
+
   /* Allocate mem for all fields in one go. If fails, caught in is_valid() */
   m_memory= (uchar*) my_multi_malloc(MYF(MY_WME),
                                      &m_dbnam, (uint) m_dblen + 1,
@@ -12018,15 +12044,24 @@ Table_map_log_event::Table_map_log_event(const char *buf, uint event_len,
     if (bytes_read < event_len)
     {
       m_field_metadata_size= net_field_length(&ptr_after_colcnt);
-      DBUG_ASSERT(m_field_metadata_size <= (m_colcnt * 2));
-      uint num_null_bytes= (m_colcnt + 7) / 8;
-      m_meta_memory= (uchar *)my_multi_malloc(MYF(MY_WME),
-                                     &m_null_bits, num_null_bytes,
-                                     &m_field_metadata, m_field_metadata_size,
-                                     NULL);
-      memcpy(m_field_metadata, ptr_after_colcnt, m_field_metadata_size);
-      ptr_after_colcnt= (uchar*)ptr_after_colcnt + m_field_metadata_size;
-      memcpy(m_null_bits, ptr_after_colcnt, num_null_bytes);
+			if (m_field_metadata_size <= (m_colcnt * 2))
+			{
+				uint num_null_bytes= (m_colcnt + 7) / 8;
+				m_meta_memory= (uchar *)my_multi_malloc(MYF(MY_WME),
+						&m_null_bits, num_null_bytes,
+						&m_field_metadata, m_field_metadata_size,
+						NULL);
+				memcpy(m_field_metadata, ptr_after_colcnt, m_field_metadata_size);
+				ptr_after_colcnt= (uchar*)ptr_after_colcnt + m_field_metadata_size;
+				memcpy(m_null_bits, ptr_after_colcnt, num_null_bytes);
+			}
+			else
+			{
+				m_coltype= NULL;
+				my_free(m_memory);
+				m_memory= NULL;
+				DBUG_VOID_RETURN;
+			}
     }
   }
 
@@ -13795,9 +13830,12 @@ void Update_rows_log_event::init(MY_BITMAP const *cols)
 
 Update_rows_log_event::~Update_rows_log_event()
 {
-  if (m_cols_ai.bitmap == m_bitbuf_ai) // no my_malloc happened
-    m_cols_ai.bitmap= 0; // so no my_free in my_bitmap_free
-  my_bitmap_free(&m_cols_ai); // To pair with my_bitmap_init().
+  if (m_cols_ai.bitmap)
+  {
+    if (m_cols_ai.bitmap == m_bitbuf_ai) // no my_malloc happened
+      m_cols_ai.bitmap= 0; // so no my_free in my_bitmap_free
+    my_bitmap_free(&m_cols_ai); // To pair with my_bitmap_init().
+  }
 }
 
 
