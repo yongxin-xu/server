@@ -2533,7 +2533,7 @@ int mysql_rm_table_no_locks(THD *thd, TABLE_LIST *tables, bool if_exists,
       wrong_tables.append(&table->table_name);
       errors++;
     }
-    else
+    else if (!(drop_temporary && if_exists))
     {
       PSI_CALL_drop_table_share(false, table->db.str, (uint)table->db.length,
                                 table->table_name.str, (uint)table->table_name.length);

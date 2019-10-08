@@ -1,0 +1,30 @@
+#
+# MDEV-17896 Assertion `pfs->get_refcount() > 0' failed
+# in release_table_share
+#
+# Let's make sure table_share_max is 500
+select @@performance_schema_max_table_instances;
+@@performance_schema_max_table_instances
+500
+# This script creates 469 tables, 30 slots in PFS table_share_array
+# are occupied by system tables
+create database tmp;
+use tmp;
+# With this table created, PFS table_share_array becomes full
+CREATE TABLE A (col int);
+# This needs to be here so that TABLE_SHARE for table A ends up
+# in table cache unused_shares list and gets picked up by FLUSH TABLES
+CREATE OR REPLACE TEMPORARY TABLE t LIKE A;
+# Dropping A using DROP TEMPORARY frees up a slot in table_share_array,
+# but the table is not actually dropped, i.e. TABLE_SHARE::m_psi still
+# points to that slot in table_share_array
+DROP TEMPORARY TABLE IF EXISTS A;
+Warnings:
+Note	1051	Unknown table 'tmp.A'
+# Newly created table B ends up stealing away the slot of table A in
+# table_share_array, thus resetting the PFS_table_share refcount
+CREATE TABLE B (col int);
+# When FLUSH TABLES picks up table A for purging, its corresponding
+# PFS_table_share contains an unexpected refcount and crashes the server.
+FLUSH TABLES;
+DROP DATABASE tmp;

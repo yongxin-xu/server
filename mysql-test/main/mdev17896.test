@@ -1,0 +1,51 @@
+--source include/have_innodb.inc
+
+--echo #
+--echo # MDEV-17896 Assertion `pfs->get_refcount() > 0' failed
+--echo # in release_table_share
+--echo #
+
+--echo # Let's make sure table_share_max is 500
+select @@performance_schema_max_table_instances;
+
+--echo # This script creates 469 tables, 30 slots in PFS table_share_array
+--echo # are occupied by system tables
+--perl
+my $file= "$ENV{MYSQL_TMP_DIR}/mysql_in";
+my $n_fields= 469;
+
+open(FILE, ">", $file) || die;
+for (my $i= 0; $i < $n_fields; $i++)
+{
+  printf FILE "CREATE TABLE table%d (a int);\n", $i;
+}
+close FILE || die;
+EOF
+
+create database tmp;
+use tmp;
+
+--exec $MYSQL -t tmp < $MYSQL_TMP_DIR/mysql_in
+
+--echo # With this table created, PFS table_share_array becomes full
+CREATE TABLE A (col int);
+
+--echo # This needs to be here so that TABLE_SHARE for table A ends up
+--echo # in table cache unused_shares list and gets picked up by FLUSH TABLES
+CREATE OR REPLACE TEMPORARY TABLE t LIKE A;
+
+--echo # Dropping A using DROP TEMPORARY frees up a slot in table_share_array,
+--echo # but the table is not actually dropped, i.e. TABLE_SHARE::m_psi still
+--echo # points to that slot in table_share_array
+DROP TEMPORARY TABLE IF EXISTS A;
+
+--echo # Newly created table B ends up stealing away the slot of table A in
+--echo # table_share_array, thus resetting the PFS_table_share refcount
+CREATE TABLE B (col int);
+
+--echo # When FLUSH TABLES picks up table A for purging, its corresponding
+--echo # PFS_table_share contains an unexpected refcount and crashes the server.
+FLUSH TABLES;
+
+# Cleanup
+DROP DATABASE tmp;
