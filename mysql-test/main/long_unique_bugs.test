@@ -340,3 +340,35 @@ while ($count)
 --eval $insert_stmt
 --enable_query_log
 drop table t1;
+#
+# MDEV-19848 Server crashes in check_vcol_forward_refs upon INSERT DELAYED into table with long blob key
+#
+CREATE  TABLE t1 (a blob, UNIQUE(a)) ENGINE=MyISAM;
+INSERT DELAYED t1 () VALUES (1);
+INSERT t1 () VALUES (2);
+# Cleanup
+DROP TABLE t1;
+CREATE TABLE t1 (a char(50), UNIQUE(a(10)) USING HASH);
+INSERT DELAYED t1 () VALUES (1);
+INSERT t1 () VALUES (2);
+# Cleanup
+DROP TABLE t1;
+CREATE TABLE t1 (
+  a CHAR(128),
+  b CHAR(128) AS (a),
+  c varchar(5000),
+  UNIQUE(c,b(64))
+) ENGINE=myisam;
+INSERT DELAYED t1 (a,c) VALUES (1,1);
+--sleep 1
+INSERT t1 (a,c) VALUES (2,2);
+INSERT t1 (a,c) VALUES (3,3);
+drop table t1;
+create table t1(a int , b int invisible);
+insert into t1 values(1);
+insert delayed into t1(a,b) values(2,2);
+--echo #Should not fails
+insert delayed into t1 values(2);
+select a,b from t1 order by a;
+# Cleanup
+DROP TABLE t1;

@@ -1223,7 +1223,16 @@ bool parse_vcol_defs(THD *thd, MEM_ROOT *mem_root, TABLE *table,
                        new (mem_root) Item_field(thd, keypart->field),
                        new (mem_root) Item_int(thd, length));
           list_item->fix_fields(thd, NULL);
-          keypart->field->vcol_info=
+          /*
+            Do not change the vcol_info when vcol_info->expr is not NULL
+            This will happen in the case of Delayed_insert::get_local_table()
+            And if we change the vcol_info in Delayed insert , then original
+            table field->vcol_info will be created on delayed insert thread
+            mem_root.
+          */
+          if (!keypart->field->vcol_info ||
+               !keypart->field->vcol_info->expr)
+            keypart->field->vcol_info=
             table->field[keypart->field->field_index]->vcol_info;
         }
         else
@@ -9083,6 +9092,26 @@ void re_setup_keyinfo_hash(KEY *key_info)
   key_info->user_defined_key_parts= key_info->usable_key_parts=
                key_info->ext_key_parts= 1;
   key_info->flags&= ~HA_NOSAME;
+}
+
+/*
+  call setup_keyinfo_hash for all keys in table
+ */
+void TABLE::setup_keyinfo_hash_all()
+{
+  for (uint i= 0; i < s->keys; i++)
+    if (key_info[i].algorithm == HA_KEY_ALG_LONG_HASH)
+      setup_keyinfo_hash(&key_info[i]);
+}
+
+/*
+  call re_setup_keyinfo_hash for all keys in table
+ */
+void TABLE::re_setup_keyinfo_hash_all()
+{
+  for (uint i= 0; i < s->keys; i++)
+    if (key_info[i].algorithm == HA_KEY_ALG_LONG_HASH)
+      re_setup_keyinfo_hash(&key_info[i]);
 }
 /**
   @brief clone of current handler.

@@ -270,3 +270,32 @@ ERROR 42000: Specified key was too long; max key length is 1000 bytes
 create table t1(a int, unique(a) using hash);
 #BULK insert > 100 rows (MI_MIN_ROWS_TO_DISABLE_INDEXES)
 drop table t1;
+CREATE  TABLE t1 (a blob, UNIQUE(a)) ENGINE=MyISAM;
+INSERT DELAYED t1 () VALUES (1);
+INSERT t1 () VALUES (2);
+DROP TABLE t1;
+CREATE TABLE t1 (a char(50), UNIQUE(a(10)) USING HASH);
+INSERT DELAYED t1 () VALUES (1);
+INSERT t1 () VALUES (2);
+DROP TABLE t1;
+CREATE TABLE t1 (
+a CHAR(128),
+b CHAR(128) AS (a),
+c varchar(5000),
+UNIQUE(c,b(64))
+) ENGINE=myisam;
+INSERT DELAYED t1 (a,c) VALUES (1,1);
+INSERT t1 (a,c) VALUES (2,2);
+INSERT t1 (a,c) VALUES (3,3);
+drop table t1;
+create table t1(a int , b int invisible);
+insert into t1 values(1);
+insert delayed into t1(a,b) values(2,2);
+#Should not fails
+insert delayed into t1 values(2);
+select a,b from t1 order by a;
+a	b
+1	NULL
+2	2
+2	NULL
+DROP TABLE t1;

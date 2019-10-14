@@ -2607,6 +2607,11 @@ TABLE *Delayed_insert::get_local_table(THD* client_thd)
   {
     if (!(*field= (*org_field)->make_new_field(client_thd->mem_root, copy, 1)))
       goto error;
+    /*
+      We want same visibility as of original table because we are just creating
+      a clone for delayed insert.
+    */
+    (*field)->invisible= (*org_field)->invisible;
     (*field)->unireg_check= (*org_field)->unireg_check;
     (*field)->orig_table= copy;			// Remove connection
     (*field)->move_field_offset(adjust_ptrs);	// Point at copy->record[0]
@@ -2621,7 +2626,33 @@ TABLE *Delayed_insert::get_local_table(THD* client_thd)
   if (share->virtual_fields || share->default_expressions ||
       share->default_fields)
   {
+    /*
+       If we have long unique table then delayed insert can modify key structure
+       (re/setup_keyinfo_hash_all) of original table when it gets insert error,
+       parse_vcol_defs will also modify key_info structure. So it is better to
+       clone the table->key_info for copy table.
+       We will not be cloning key_part_info or even changing any field ptr.
+       Because re/setup_keyinfo_hash_all only modify key_info array. So it will
+       be like having new key_info array for copy table with old key_part_info
+       ptr.
+    */
+    if (share->long_unique_table)
+    {
+      KEY *key_info;
+      if (!(key_info= (KEY*) client_thd->alloc(share->keys*sizeof(KEY))))
+        goto error;
+      copy->key_info= key_info;
+      memcpy(key_info, table->key_info, sizeof(KEY)*share->keys);
+    }
+    /*
+      parse_vcol_defs expects key_infos to be in user defined format.
+    */
+    copy->setup_keyinfo_hash_all();
     bool error_reported= FALSE;
+    /*
+      We won't be calling re_setup_keyinfo_hash because parse_vcol_defs changes
+      key_infos to storage engine format
+    */
     if (unlikely(parse_vcol_defs(client_thd, client_thd->mem_root, copy,
                                  &error_reported,
                                  VCOL_INIT_DEPENDENCY_FAILURE_IS_WARNING)))
