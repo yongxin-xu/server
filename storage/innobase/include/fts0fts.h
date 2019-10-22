@@ -985,8 +985,4 @@ fts_trx_t*
 fts_trx_create(
 	trx_t*  trx);
 
-/** Check whether the work queue is initialized.
-@return true if it is initialized. */
-bool fts_optimize_is_init();
-
 #endif /*!< fts0fts.h */

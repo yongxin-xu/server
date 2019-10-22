@@ -28,15 +28,6 @@ A work queue
 Created 4/26/2006 Osku Salerma
 ************************************************************************/
 
-/* Work queue. */
-struct ib_wqueue_t {
-	ib_mutex_t	mutex;	/*!< mutex protecting everything */
-	ib_list_t*	items;	/*!< work item list */
-	os_event_t	event;	/*!< event we use to signal additions to list;
-				os_event_set() and os_event_reset() are
-				protected by ib_wqueue_t::mutex */
-};
-
 /****************************************************************//**
 Create a new work queue.
 @return work queue */
@@ -234,18 +225,4 @@ ib_wqueue_len(
 	mutex_exit(&wq->mutex);
 
         return(len);
-}
-
-/** Lock the mutex of the working queue
-@param[in,out]	wq	working queue to be locked. */
-void ib_wqueue_lock(ib_wqueue_t* wq)
-{
-	mutex_enter(&wq->mutex);
-}
-
-/** Unlock the mutex of the working queue
-@param[in,out]	wq	working queue to be unlocked. */
-void ib_wqueue_unlock(ib_wqueue_t* wq)
-{
-	mutex_exit(&wq->mutex);
 }

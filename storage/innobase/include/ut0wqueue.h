@@ -38,7 +38,17 @@ processing.
 
 // Forward declaration
 struct ib_list_t;
-struct ib_wqueue_t;
+
+struct ib_wqueue_t {
+	/* mutex to protect all members. */
+	ib_mutex_t	mutex;
+	/* Work item list */
+	ib_list_t*	items;
+	/* event to signal additions to list;
+	os_event_set() and os_event_reset() are protected
+	by ib_wqueue_t::mutex */
+	os_event_t	event;
+};
 
 /****************************************************************//**
 Create a new work queue.
@@ -103,13 +113,5 @@ ulint
 ib_wqueue_len(
 /*==========*/
 	ib_wqueue_t*	wq);		/*<! in: work queue */
-
-/** Lock the mutex of the working queue
-@param[in,out]	wq	working queue to be locked */
-void ib_wqueue_lock(ib_wqueue_t* wq);
-
-/** Release the mutex of the working queue
-@param[in, out]	wq	working queue lock to be released */
-void ib_wqueue_unlock(ib_wqueue_t* wq);
 
 #endif /* IB_WORK_QUEUE_H */
