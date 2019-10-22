@@ -320,9 +320,6 @@ public:
 	/** Mutex protecting bg_threads* and fts_add_wq. */
 	ib_mutex_t	bg_threads_mutex;
 
-	/** Whether the table was added to fts_optimize_wq();
-	protected by bg_threads_mutex */
-	unsigned	in_queue:1;
 	/** Whether the ADDED table record sync-ed after
 	crash recovery; protected by bg_threads_mutex */
 	unsigned	added_synced:1;
@@ -347,6 +344,10 @@ public:
 
 	/** Vector of FTS indexes, this is mainly for caching purposes. */
 	ib_vector_t*	indexes;
+
+	/** Whether the table table was added to fts_optimize_wq();
+	protected by fts_optimize_wq mutex */
+	bool		in_queue;
 
 	/** Heap for fts_t allocation. */
 	mem_heap_t*	fts_heap;
@@ -983,5 +984,9 @@ fts_add_doc_from_tuple(
 fts_trx_t*
 fts_trx_create(
 	trx_t*  trx);
+
+/** Check whether the work queue is initialized.
+@return true if it is initialized. */
+bool fts_optimize_is_init();
 
 #endif /*!< fts0fts.h */
