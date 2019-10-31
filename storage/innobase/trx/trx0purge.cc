@@ -1101,6 +1101,44 @@ trx_purge_fetch_next_rec(
 	return(trx_purge_get_next_rec(n_pages_handled, heap));
 }
 
+/** Class to maintain purge nodes and vector of undo log records
+which was allocated to purge nodes. */
+class undo_log_map_t {
+public:
+	undo_log_map_t(
+		purge_node_t* purge_node,
+		ib_vector_t* purge_records):
+		node(purge_node),
+		purge_recs(purge_records) {}
+
+	purge_node_t*	node;
+	ib_vector_t*	purge_recs;
+};
+
+/** Copy the purge record to the heap.
+@param[in]	source	purge record
+@param[in,out]	heap	heap where it is copied
+@return copy of purge record */
+static trx_purge_rec_t*
+trx_purge_rec_dup_copy(
+	trx_purge_rec_t*	source,
+	mem_heap_t*		heap) {
+
+	trx_purge_rec_t* purge_record = static_cast<trx_purge_rec_t*>(
+				mem_heap_dup(heap, source, sizeof(*source)));
+
+	if (purge_record->undo_rec == &trx_purge_dummy_rec) {
+		return purge_record;
+	}
+
+	ulint undo_len = mach_read_from_2(purge_record->undo_rec);
+
+	purge_record->undo_rec = static_cast<trx_undo_rec_t*>(
+				mem_heap_dup(heap, source->undo_rec,
+					     undo_len));
+	return purge_record;
+}
+
 /** Run a purge batch.
 @param n_purge_threads	number of purge threads
 @return number of undo log pages handled in the batch */
@@ -1139,7 +1177,6 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 	however is allowed because we only use purge threads as needed. */
 	ut_ad(i == n_purge_threads);
 #endif
-
 	/* Fetch and parse the UNDO records. The UNDO records are added
 	to a per purge node vector. */
 	thr = UT_LIST_GET_FIRST(purge_sys.query->thrs);
@@ -1150,19 +1187,23 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 	i = 0;
 
 	const ulint batch_size = srv_purge_batch_size;
+	mem_heap_t*	temp_heap = mem_heap_create(256);
+	typedef	ut_allocator<std::pair<const table_id_t, undo_log_map_t> >
+			undo_map_allocator;
+	typedef std::map<table_id_t, undo_log_map_t, std::less<table_id_t>,
+			 undo_map_allocator> undo_map_t;
 
-	while (UNIV_LIKELY(srv_undo_sources) || !srv_fast_shutdown) {
-		purge_node_t*		node;
+	undo_map_t	undo_map;
+	ib_vector_t*	recs;
+	purge_node_t*	node;
+
+	while(n_pages_handled < batch_size) {
 		trx_purge_rec_t*	purge_rec;
 
 		ut_a(!thr->is_active);
 
-		/* Get the purge node. */
-		node = (purge_node_t*) thr->child;
-		ut_a(que_node_get_type(node) == QUE_NODE_PURGE);
-
 		purge_rec = static_cast<trx_purge_rec_t*>(
-			mem_heap_zalloc(node->heap, sizeof(*purge_rec)));
+			mem_heap_zalloc(temp_heap, sizeof(*purge_rec)));
 
 		/* Track the max {trx_id, undo_no} for truncating the
 		UNDO logs once we have purged the records. */
@@ -1173,40 +1214,71 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 
 		/* Fetch the next record, and advance the purge_sys.tail. */
 		purge_rec->undo_rec = trx_purge_fetch_next_rec(
-			&purge_rec->roll_ptr, &n_pages_handled, node->heap);
+			&purge_rec->roll_ptr, &n_pages_handled,
+			temp_heap);
 
-		if (purge_rec->undo_rec != NULL) {
-
-			if (node->undo_recs == NULL) {
-				node->undo_recs = ib_vector_create(
-					ib_heap_allocator_create(node->heap),
-					sizeof(trx_purge_rec_t),
-					batch_size);
-			} else {
-				ut_a(!ib_vector_is_empty(node->undo_recs));
-			}
-
-			ib_vector_push(node->undo_recs, purge_rec);
-
-			if (n_pages_handled >= batch_size) {
-
-				break;
-			}
-		} else {
+		if (purge_rec->undo_rec == NULL) {
+			mem_heap_empty(temp_heap);
 			break;
 		}
 
-		thr = UT_LIST_GET_NEXT(thrs, thr);
+		const table_id_t table_id = trx_undo_rec_get_table_id(
+					purge_rec->undo_rec);
 
-		if (!(++i % n_purge_threads)) {
-			thr = UT_LIST_GET_FIRST(purge_sys.query->thrs);
+		auto it = undo_map.find(table_id);
+
+		if (it != undo_map.end()) {
+			recs = it->second.purge_recs;
+			node = it->second.node;
+		} else {
+			/* Get the purge node. */
+			node = (purge_node_t*) thr->child;
+			ib_vector_t*	purge_recs = ib_vector_create(
+					ib_heap_allocator_create(node->heap),
+					sizeof(trx_purge_rec_t),
+					batch_size);
+
+			undo_log_map_t undo_log_rec(node, purge_recs);
+			undo_map.insert(
+				std::pair<const table_id_t, undo_log_map_t>
+				(table_id, undo_log_rec));
+
+			thr = UT_LIST_GET_NEXT(thrs, thr);
+
+			if (!(++i % n_purge_threads)) {
+				thr = UT_LIST_GET_FIRST(
+					purge_sys.query->thrs);
+			}
+
+			ut_a(thr != NULL);
+			recs = purge_recs;
 		}
 
-		ut_a(thr != NULL);
+		trx_purge_rec_t* purge_record = trx_purge_rec_dup_copy(
+					purge_rec, node->heap);
+		ib_vector_push(recs, purge_record);
+
+		ut_a(que_node_get_type(node) == QUE_NODE_PURGE);
+		mem_heap_empty(temp_heap);
 	}
 
 	ut_ad(purge_sys.head <= purge_sys.tail);
 
+	for (auto it = undo_map.begin(); it != undo_map.end(); it++) {
+		purge_node_t* node = it->second.node;
+		if (node->undo_recs == nullptr) {
+			node->undo_recs = it->second.purge_recs;
+			continue;
+		}
+
+		for (ulint j = 0; j < it->second.purge_recs->used; j++) {
+			ib_vector_push(
+				node->undo_recs,
+				ib_vector_get(it->second.purge_recs, j));
+		}
+	}
+
+	mem_heap_free(temp_heap);
 	return(n_pages_handled);
 }
 
