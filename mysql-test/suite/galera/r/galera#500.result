@@ -1,8 +1,13 @@
+<<<<<<< HEAD
 connection node_2;
 connection node_1;
 connection node_1;
 connection node_2;
 connection node_2;
+||||||| merged common ancestors
+=======
+connection node_2;
+>>>>>>> bb-10.3-release
 SET SESSION wsrep_sync_wait = 0;
 SET GLOBAL wsrep_provider_options="gmcast.isolate=2";
 connection node_1;
