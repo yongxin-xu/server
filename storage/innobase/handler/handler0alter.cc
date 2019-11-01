@@ -7428,30 +7428,28 @@ innobase_drop_foreign_try(
 }
 
 /** Rename a column in the data dictionary tables.
-@param[in] user_table		InnoDB table that was being altered
+@param[in] ctx			Inplace Alter table context
 @param[in] trx			Data dictionary transaction
 @param[in] table_name		Table name in MySQL
 @param[in] nth_col		0-based index of the column
 @param[in] from			old column name
 @param[in] to			new column name
-@param[in] new_clustered	whether the table has been rebuilt
-@param[in] evict_fk_cache	Evict the fk info from cache
 @retval true Failure
 @retval false Success */
 static MY_ATTRIBUTE((nonnull, warn_unused_result))
 bool
 innobase_rename_column_try(
-	const dict_table_t*	user_table,
-	trx_t*			trx,
-	const char*		table_name,
-	ulint			nth_col,
-	const char*		from,
-	const char*		to,
-	bool			new_clustered,
-	bool			evict_fk_cache)
+	ha_innobase_inplace_ctx*	ctx,
+	trx_t*				trx,
+	const char*			table_name,
+	ulint				nth_col,
+	const char*			from,
+	const char*			to)
 {
 	pars_info_t*	info;
 	dberr_t		error;
+	dict_table_t*	user_table = ctx->old_table;
+	bool		new_clustered = ctx->need_rebuild();
 
 	DBUG_ENTER("innobase_rename_column_try");
 
@@ -7563,6 +7561,14 @@ rename_foreign:
 				continue;
 			}
 
+			/* Ignore the foreign key rename if fk info
+			is being dropped. */
+			if (innobase_dropping_foreign(
+				foreign, ctx->drop_fk,
+				ctx->num_to_drop_fk)) {
+				continue;
+			}
+
 			info = pars_info_create();
 
 			pars_info_add_str_literal(info, "id", foreign->id);
@@ -7633,7 +7639,7 @@ rename_foreign:
 	}
 
 	/* Reload the foreign key info for instant table too. */
-	if (new_clustered || evict_fk_cache) {
+	if (new_clustered || ctx->is_instant()) {
 		std::for_each(fk_evict.begin(), fk_evict.end(),
 			      dict_foreign_remove_from_cache);
 	}
@@ -7684,12 +7690,10 @@ innobase_rename_columns_try(
 						: i - num_v;
 
 				if (innobase_rename_column_try(
-					    ctx->old_table, trx, table_name,
+					    ctx, trx, table_name,
 					    col_n,
 					    cf->field->field_name.str,
-					    cf->field_name.str,
-					    ctx->need_rebuild(),
-					    ctx->is_instant())) {
+					    cf->field_name.str)) {
 					return(true);
 				}
 				goto processed_field;

@@ -154,3 +154,20 @@ DROP TABLE t2, t1;
 
 --let $datadir= `select @@datadir`
 --remove_file $datadir/test/load.data
+
+--echo # Double free of dict_foreign_t for instant table
+
+CREATE TABLE t1 (id INT UNSIGNED PRIMARY KEY) ENGINE=InnoDB;
+CREATE TABLE t2 (
+    a INT(10) UNSIGNED NOT NULL,
+    b INT(10) UNSIGNED NOT NULL,
+    PRIMARY KEY (a, b),
+    KEY (a),
+    KEY (b),
+    FOREIGN KEY fk1 (b) REFERENCES t1 (id)
+) Engine=InnoDB;
+ALTER TABLE t2
+    DROP FOREIGN KEY fk1,
+    CHANGE b d INT(10) UNSIGNED NOT NULL,
+    ADD c INT(10) UNSIGNED;
+DROP TABLE t2, t1;
