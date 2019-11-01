@@ -19,15 +19,8 @@ connection node_1a;
 SET SESSION wsrep_on = 0;
 SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_master_enter_sync';
 connection node_1;
-||||||| merged common ancestors
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-=======
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-connection node_1;
->>>>>>> bb-10.3-release
 COMMIT;
 connection node_1a;
 SET SESSION wsrep_on = 0;
@@ -35,17 +28,9 @@ SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'signal=apply_monitor_slave_enter_sync';
 SET GLOBAL wsrep_provider_options = 'signal=local_monitor_master_enter_sync';
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 connection node_1;
 ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
 connection node_2;
-||||||| merged common ancestors
-ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
-=======
-connection node_1;
-ERROR 40001: Deadlock: wsrep aborted transaction
-connection node_2;
->>>>>>> bb-10.3-release
 SELECT * FROM p;
 f1	f2
 1	0
@@ -76,15 +61,8 @@ connection node_1a;
 SET SESSION wsrep_on = 0;
 SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_master_enter_sync';
 connection node_1;
-||||||| merged common ancestors
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-=======
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-connection node_1;
->>>>>>> bb-10.3-release
 COMMIT;
 connection node_1a;
 SET SESSION wsrep_on = 0;
@@ -123,15 +101,8 @@ connection node_1a;
 SET SESSION wsrep_on = 0;
 SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_master_enter_sync';
 connection node_1;
-||||||| merged common ancestors
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-=======
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-connection node_1;
->>>>>>> bb-10.3-release
 COMMIT;
 connection node_1a;
 SET SESSION wsrep_on = 0;
@@ -166,15 +137,8 @@ connection node_1a;
 SET SESSION wsrep_on = 0;
 SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_master_enter_sync';
 connection node_1;
-||||||| merged common ancestors
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-=======
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-connection node_1;
->>>>>>> bb-10.3-release
 COMMIT;
 connection node_1a;
 SET SESSION wsrep_on = 0;
@@ -182,17 +146,9 @@ SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'signal=apply_monitor_slave_enter_sync';
 SET GLOBAL wsrep_provider_options = 'signal=local_monitor_master_enter_sync';
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 connection node_1;
 ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
 connection node_2;
-||||||| merged common ancestors
-ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
-=======
-connection node_1;
-ERROR 40001: Deadlock: wsrep aborted transaction
-connection node_2;
->>>>>>> bb-10.3-release
 SELECT * FROM p;
 f1	f2
 1	0
@@ -221,15 +177,8 @@ connection node_1a;
 SET SESSION wsrep_on = 0;
 SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_master_enter_sync';
 connection node_1;
-||||||| merged common ancestors
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-=======
-SET GLOBAL wsrep_provider_options = 'dbug=d,local_monitor_enter_sync';
-connection node_1;
->>>>>>> bb-10.3-release
 COMMIT;
 connection node_1a;
 SET SESSION wsrep_on = 0;
@@ -237,17 +186,9 @@ SET SESSION wsrep_on = 1;
 SET GLOBAL wsrep_provider_options = 'signal=apply_monitor_slave_enter_sync';
 SET GLOBAL wsrep_provider_options = 'signal=local_monitor_master_enter_sync';
 SET GLOBAL wsrep_provider_options = 'dbug=';
-<<<<<<< HEAD
 connection node_1;
 ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
 connection node_2;
-||||||| merged common ancestors
-ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
-=======
-connection node_1;
-ERROR 40001: Deadlock: wsrep aborted transaction
-connection node_2;
->>>>>>> bb-10.3-release
 SELECT * FROM p;
 f1	f2
 1	0

@@ -1,13 +1,7 @@
-<<<<<<< HEAD
 connection node_2;
 connection node_1;
 connection node_1;
 connection node_2;
-||||||| merged common ancestors
-=======
-connection node_1;
-connection node_2;
->>>>>>> bb-10.3-release
 CREATE TABLE t1 (f1 INT PRIMARY KEY, f2 TEXT);
 connection node_2;
 SET GLOBAL wsrep_cluster_address='';
@@ -27,15 +21,8 @@ SET SESSION wsrep_on = 1;
 INSERT INTO t1 VALUES (2, "bbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 connection node_1a;
 SET GLOBAL wsrep_provider_options = 'signal=gcs_core_after_frag_send';
-<<<<<<< HEAD
 connection node_1;
 ERROR HY000: Got error 6 "No such device or address" during COMMIT
-||||||| merged common ancestors
-ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
-=======
-connection node_1;
-ERROR 40001: Deadlock: wsrep aborted transaction
->>>>>>> bb-10.3-release
 INSERT INTO t1 VALUES (3, "cccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 SELECT * FROM t1;
 f1	f2
