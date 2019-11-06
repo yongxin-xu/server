@@ -1333,3 +1333,15 @@ INSERT INTO t1 (a) VALUES
 SELECT * FROM t1 WHERE MATCH (a) AGAINST ('+"good database"' IN BOOLEAN MODE);
 
 DROP TABLE t1;
+
+--echo #
+--echo # MDEV-20987 InnoDB fails to start when fts table has FK relation
+--echo #
+CREATE TABLE t1(f1 INT NOT NULL, PRIMARY KEY(f1))ENGINE=InnoDB;
+CREATE TABLE t2(f1 INT NOT NULL, f2 CHAR(100),
+                FULLTEXT(f2),
+                FOREIGN KEY(f1) REFERENCES t1(f1))ENGINE=InnoDB;
+INSERT INTO t1 VALUES(1);
+INSERT INTO t2 VALUES(1, "mariadb");
+--source include/restart_mysqld.inc
+DROP TABLE t2, t1;
