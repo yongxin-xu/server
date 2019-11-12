@@ -2545,12 +2545,6 @@ void fts_optimize_add_table(dict_table_t* table)
 		return;
 	}
 
-	/* If there is no fts index present then don't add to
-	optimize queue. */
-	if (!ib_vector_size(table->fts->indexes)) {
-		return;
-	}
-
 	/* Make sure table with FTS index cannot be evicted */
 	dict_table_prevent_eviction(table);
 
@@ -2607,6 +2601,8 @@ fts_optimize_remove_table(
 	remove->table = table;
 	remove->event = event;
 	msg->ptr = remove;
+
+	ut_ad(!mutex_own(&dict_sys.mutex));
 
 	ib_wqueue_add(fts_optimize_wq, msg, msg->heap, true);
 
@@ -2773,13 +2769,30 @@ static bool fts_is_sync_needed()
 
 /** Sync fts cache of a table
 @param[in,out]	table	table to be synced */
-static void fts_optimize_sync_table(dict_table_t* table)
+static void fts_optimize_sync_table(
+	dict_table_t*	table,
+	THD*		fts_opt_thread)
 {
-	if (table->fts && table->fts->cache && fil_table_accessible(table)) {
-		fts_sync_table(table, false);
+	MDL_ticket*	mdl_ticket = NULL;
+
+	dict_table_t*	sync_table = dict_acquire_mdl_shared_no_wait(
+			table, fts_opt_thread, &mdl_ticket);
+
+	if (!sync_table) {
+		return;
+	}
+
+	if (sync_table->fts && sync_table->fts->cache
+	   && fil_table_accessible(sync_table)) {
+		fts_sync_table(sync_table, false);
 	}
 
 	DBUG_EXECUTE_IF("ib_optimize_wq_hang", os_thread_sleep(6000000););
+
+	if (mdl_ticket) {
+		dict_table_close(sync_table, false, false,
+				 fts_opt_thread, mdl_ticket);
+	}
 }
 
 /**********************************************************************//**
@@ -2799,7 +2812,8 @@ DECLARE_THREAD(fts_optimize_thread)(
 
 	ut_ad(!srv_read_only_mode);
 	my_thread_init();
-
+	THD*	fts_opt_thread = innobase_create_background_thd(
+			"InnoDB fts optimize thread");
 	ut_ad(fts_slots);
 
 	/* Assign number of tables added in fts_slots_t to n_tables */
@@ -2877,7 +2891,8 @@ DECLARE_THREAD(fts_optimize_thread)(
 					os_thread_sleep(300000););
 
 				fts_optimize_sync_table(
-					static_cast<dict_table_t*>(msg->ptr));
+					static_cast<dict_table_t*>(msg->ptr),
+					fts_opt_thread);
 				break;
 
 			default:
@@ -2897,7 +2912,8 @@ DECLARE_THREAD(fts_optimize_thread)(
 				ib_vector_get(fts_slots, i));
 
 			if (slot->table) {
-				fts_optimize_sync_table(slot->table);
+				fts_optimize_sync_table(
+					slot->table, fts_opt_thread);
 			}
 		}
 	}
@@ -2908,6 +2924,7 @@ DECLARE_THREAD(fts_optimize_thread)(
 	ib::info() << "FTS optimize thread exiting.";
 
 	os_event_set(fts_opt_shutdown_event);
+	innobase_destroy_background_thd(fts_opt_thread);
 	my_thread_end();
 
 	/* We count the number of threads in os_thread_exit(). A created
