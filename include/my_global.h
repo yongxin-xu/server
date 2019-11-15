@@ -811,27 +811,35 @@ inline unsigned long long my_double2ulonglong(double d)
 #define SIZE_T_MAX      (~((size_t) 0))
 #endif
 
-#ifndef isfinite
+#if (__cplusplus >= 201103L)
+#include <cmath>
+#define isfinite(x) std::isfinite(x)
+#elif !defined(isfinite) /* (__cplusplus >= 201103L) */
 #ifdef HAVE_FINITE
 #define isfinite(x) finite(x)
 #else
 #define finite(x) (1.0 / fabs(x) > 0.0)
 #endif /* HAVE_FINITE */
-#elif (__cplusplus >= 201103L)
-#include <cmath>
-static inline bool isfinite(double x) { return std::isfinite(x); }
-#endif /* isfinite */
+#endif /* !defined(isfinite) */
 
+#if (__cplusplus >= 201103L)
+#define my_isnan(x) std::isnan(x)
+#else /* (__cplusplus >= 201103L) */
 #ifndef HAVE_ISNAN
 #define isnan(x) ((x) != (x))
 #endif
 #define my_isnan(x) isnan(x)
+#endif /* (__cplusplus >= 201103L) */
 
+#if (__cplusplus >= 201103L)
+#define my_isinf(x) std::isinf(x)
+#else /* (__cplusplus >= 201103L) */
 #ifdef HAVE_ISINF
 #define my_isinf(X) isinf(X)
 #else /* !HAVE_ISINF */
 #define my_isinf(X) (!finite(X) && !isnan(X))
-#endif
+#endif /* !HAVE_ISINF */
+#endif /* (__cplusplus >= 201103L) */
 
 /* Define missing math constants. */
 #ifndef M_PI
