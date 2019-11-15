@@ -2665,7 +2665,7 @@ fts_optimize_request_sync_table(
 
 	add_msg(msg, true);
 
-	table->fts->in_queue = true;
+	table->fts->in_queue = table->fts->sync_message = true;
 
 	mutex_exit(&fts_optimize_wq->mutex);
 }
@@ -2792,10 +2792,13 @@ static bool fts_is_sync_needed()
 }
 
 /** Sync fts cache of a table
-@param[in,out]	table	table to be synced */
+@param[in,out]	table		table to be synced
+@param[in]	fts_opt_thread	fts optimize thread
+@param[in]	process_message	processing messages from fts_optimize_wq */
 static void fts_optimize_sync_table(
 	dict_table_t*	table,
-	THD*		fts_opt_thread)
+	THD*		fts_opt_thread,
+	bool		process_message=false)
 {
 	MDL_ticket*	mdl_ticket = NULL;
 
@@ -2809,6 +2812,11 @@ static void fts_optimize_sync_table(
 	if (sync_table->fts && sync_table->fts->cache
 	   && fil_table_accessible(sync_table)) {
 		fts_sync_table(sync_table, false);
+		if (process_message) {
+			mutex_enter(&fts_optimize_wq->mutex);
+			sync_table->fts->sync_message = false;
+			mutex_exit(&fts_optimize_wq->mutex);
+		}
 	}
 
 	DBUG_EXECUTE_IF("ib_optimize_wq_hang", os_thread_sleep(6000000););
@@ -2834,7 +2842,6 @@ void fts_optimize_callback(
 	ib_wqueue_t*		wq = fts_optimize_wq;
 
 	ut_ad(!srv_read_only_mode);
-	ut_ad(fts_slots);
 
 	if (!fts_optimize_wq) {
 		/* Possibly timer initiated callback, can come after FTS_MSG_STOP.*/
@@ -2912,7 +2919,7 @@ void fts_optimize_callback(
 
 				fts_optimize_sync_table(
 					static_cast<dict_table_t*>(msg->ptr),
-					fts_opt_thd);
+					fts_opt_thd, true);
 				break;
 
 			default:
@@ -3032,4 +3039,24 @@ fts_optimize_shutdown()
 	ib_wqueue_free(fts_optimize_wq);
 	fts_optimize_wq = NULL;
 
+}
+
+/** Sync the table during commit phase
+@param[in]	table	table to be synced */
+void fts_sync_during_ddl(dict_table_t* table)
+{
+	mutex_enter(&fts_optimize_wq->mutex);
+
+	if (!table->fts->sync_message) {
+		mutex_exit(&fts_optimize_wq->mutex);
+		return;
+	}
+
+	mutex_exit(&fts_optimize_wq->mutex);
+
+	fts_sync_table(table);
+
+	mutex_enter(&fts_optimize_wq->mutex);
+	table->fts->sync_message = false;
+	mutex_exit(&fts_optimize_wq->mutex);
 }
