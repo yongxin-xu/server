@@ -217,6 +217,8 @@ public:
 		fil_space_t*	last;
 	} truncate;
 
+	/** Heap for reading the undo log records */
+	mem_heap_t*	m_heap;
   /**
     Constructor.
 
@@ -264,12 +266,6 @@ public:
 
 /** The global data structure coordinating a purge */
 extern purge_sys_t	purge_sys;
-
-/** Info required to purge a record */
-struct trx_purge_rec_t {
-	trx_undo_rec_t*	undo_rec;	/*!< Record to purge */
-	roll_ptr_t	roll_ptr;	/*!< File pointr to UNDO record */
-};
 
 #include "trx0purge.ic"
 
