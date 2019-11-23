@@ -674,19 +674,43 @@ public:
 		def_val.data = NULL;
 	}
 
+	/** Determine if the columns have same mtype.
+	@param[in]	other	column to compare to
+	@return whether the column have the same mtype. */
+	bool same_mtype(const dict_col_t& other) const {
+	  if (mtype == other.mtype)
+	    return true;
+
+	  /* DATA_CHAR and DATA_VARCHAR can be changed to
+	  DATA_MYSQL and DATA_VARMYSQL if charset is of type latin1
+	  and when collate is changed to/from latin_swedish_ci. */
+	  if (dtype_is_latin1(prtype) && dtype_is_latin1(other.prtype))
+	  {
+	    if (dtype_get_charset_coll(prtype)
+		== dtype_get_charset_coll(other.prtype))
+	      return false;
+
+	    if ((mtype == DATA_VARCHAR && other.mtype == DATA_VARMYSQL)
+	        || (mtype == DATA_VARMYSQL && other.mtype == DATA_VARCHAR)
+		|| (mtype == DATA_CHAR && other.mtype == DATA_MYSQL)
+		|| (mtype == DATA_MYSQL && other.mtype == DATA_CHAR))
+              return true;
+	  }
+          return false;
+	}
+
 	/** Determine if the columns have the same format
 	except for is_nullable() and is_versioned().
 	@param[in]	other	column to compare to
 	@return	whether the columns have the same format */
 	bool same_format(const dict_col_t& other) const
 	{
-		return mtype == other.mtype
-			&& len >= other.len
-			&& mbminlen == other.mbminlen
-			&& mbmaxlen == other.mbmaxlen
-			&& !((prtype ^ other.prtype)
-			     & ~(DATA_NOT_NULL | DATA_VERSIONED
-				 | DATA_LONG_TRUE_VARCHAR));
+	  if (!same_mtype(other))
+            return false;
+
+	  return len >= other.len
+                 && mbminlen == other.mbminlen
+                 && mbmaxlen == other.mbmaxlen;
 	}
 };
 

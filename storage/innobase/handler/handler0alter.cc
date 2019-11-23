@@ -537,10 +537,7 @@ inline bool dict_table_t::instant_column(const dict_table_t& table,
 
 		if (const dict_col_t* o = find(old_cols, col_map, n_cols, i)) {
 			c.def_val = o->def_val;
-			DBUG_ASSERT(!((c.prtype ^ o->prtype)
-				      & ~(DATA_NOT_NULL | DATA_VERSIONED
-					  | DATA_LONG_TRUE_VARCHAR)));
-			DBUG_ASSERT(c.mtype == o->mtype);
+			DBUG_ASSERT(o->same_mtype(c));
 			DBUG_ASSERT(c.len >= o->len);
 
 			if (o->vers_sys_start()) {

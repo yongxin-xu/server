@@ -505,6 +505,10 @@ dtype_print(
 	const dtype_t*	type);
 #endif /* UNIV_DEBUG */
 
+/** Determine if a MySQL string type is a subset of latin1.
+@return whether a subset of latin1 */
+bool dtype_is_latin1(ulint prtype);
+
 /* Structure for an SQL data type.
 If you add fields to this structure, be sure to initialize them everywhere.
 This structure is initialized in the following functions:

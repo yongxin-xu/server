@@ -209,4 +209,21 @@ dtype_print(const dtype_t* type)
 
 	fprintf(stderr, " len %lu", (ulong) len);
 }
+
 #endif /* UNIV_DEBUG */
+
+bool dtype_is_latin1(ulint prtype)
+{
+  switch (dtype_get_charset_coll(prtype)) {
+  case 5:  /* latin1_german1_ci */
+  case 8:  /* latin1_swedish_ci */
+  case 15: /* latin1_danish_ci */
+  case 31: /* latin1_german2_ci */
+  case 47: /* latin1_bin */
+  case 48: /* latin1_general_ci */
+  case 49: /* latin1_general_cs */
+  case 94: /* latin1_spanish_ci */
+    return true;
+  }
+  return false;
+}
