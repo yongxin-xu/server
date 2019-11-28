@@ -54,6 +54,7 @@
 #include "sql_audit.h"
 #include "sql_sequence.h"
 #include "tztime.h"
+#include "rpl_mi.h"
 
 
 #ifdef __WIN__
@@ -7703,6 +7704,7 @@ static bool mysql_inplace_alter_table(THD *thd,
   if (table->file->ha_prepare_inplace_alter_table(altered_table,
                                                   ha_alter_info))
     goto rollback;
+  //OLTODO
 
   /*
     Downgrade the lock if storage engine has told us that exclusive lock was
@@ -9379,6 +9381,8 @@ bool mysql_alter_table(THD *thd, const LEX_CSTRING *new_db,
                        uint order_num, ORDER *order, bool ignore)
 {
   bool engine_changed;
+  char send_query[thd->query_length() + 20];
+  bool partial_alter= false;
   DBUG_ENTER("mysql_alter_table");
 
   /*
@@ -10161,6 +10165,15 @@ do_continue:;
   if (lock_tables(thd, table_list, alter_ctx.tables_opened,
                   MYSQL_LOCK_USE_MALLOC))
     goto err_new_table_cleanup;
+  //If issues by binlog/master complete the prepare phase of alter and then commit
+  if (!thd->lex->previous_commit_id)
+  {
+    sprintf(send_query, "/*!100001 START %s */", thd->query());
+    if (write_bin_log(thd, FALSE, send_query, strlen(send_query), true))
+      DBUG_RETURN(true);
+    else
+      partial_alter= true;
+  }
 
   if (ha_create_table(thd, alter_ctx.get_tmp_path(),
                       alter_ctx.new_db.str, alter_ctx.new_name.str,
@@ -10258,9 +10271,15 @@ do_continue:;
                                     &alter_ctx.new_name))
       goto err_new_table_cleanup;
     /* We don't replicate alter table statement on temporary tables */
-    if (!thd->is_current_stmt_binlog_format_row() &&
+    if (!thd->is_current_stmt_binlog_format_row() && !partial_alter &&
         write_bin_log(thd, true, thd->query(), thd->query_length()))
       DBUG_RETURN(true);
+    if (partial_alter)
+    {
+      sprintf(send_query, "/*!100001 COMMIT */ %s", thd->query());
+      if(write_bin_log(thd, FALSE, send_query, strlen(send_query), true))
+        DBUG_RETURN(true);
+    }
     my_free(const_cast<uchar*>(frm.str));
     goto end_temporary;
   }
@@ -10275,6 +10294,33 @@ do_continue:;
     - Neither old or new engine uses files from another engine
       The above is mainly true for the sequence and the partition engine.
   */
+  if (thd->lex->previous_commit_id)
+  {
+    if (write_bin_log(thd, true, thd->query(), thd->query_length(), true))
+      DBUG_RETURN(true);
+    if (ha_commit_trans(thd, true))
+      DBUG_RETURN(true);
+    DBUG_ASSERT(thd->slave_thread);
+    Master_info *mi= thd->rgi_slave->rli->mi;
+    start_alter_info *info= (start_alter_info *)thd->alloc(sizeof(start_alter_info));
+    info->error= 0;
+    info->thread_id= thd->lex->previous_commit_id;
+    info->state= start_alter_state::WAITING;
+    mi->start_alter_list.push_back(info, thd->mem_root);
+    mysql_mutex_lock(&mi->start_alter_lock);
+    while (mysql_cond_wait(&mi->start_alter_cond, &mi->start_alter_lock))
+    {
+      if (info->state == start_alter_state::COMMIT_ALTER)
+      {
+
+        break;
+      }
+      if (info->state == start_alter_state::ROLLBACK_ALTER)
+      {
+       DBUG_RETURN(true);
+      }
+    }
+  }
   engine_changed= ((new_table->file->ht != table->file->ht) &&
                    (((!(new_table->file->ha_table_flags() & HA_FILE_BASED) ||
                       !(table->file->ha_table_flags() & HA_FILE_BASED))) ||
@@ -10441,7 +10487,13 @@ end_inplace:
   DBUG_ASSERT(!(mysql_bin_log.is_open() &&
                 thd->is_current_stmt_binlog_format_row() &&
                 (create_info->tmp_table())));
-  if (write_bin_log(thd, true, thd->query(), thd->query_length()))
+  if (partial_alter)
+  {
+    sprintf(send_query, "/*!100001 COMMIT */ %s", thd->query());
+    if(write_bin_log(thd, FALSE, send_query, strlen(send_query), true))
+      DBUG_RETURN(true);
+  }
+  else if (write_bin_log(thd, true, thd->query(), thd->query_length()))
     DBUG_RETURN(true);
 
   table_list->table= NULL;			// For query cache
@@ -10504,6 +10556,7 @@ err_with_mdl_after_alter:
     expects that error is set
   */
   write_bin_log(thd, FALSE, thd->query(), thd->query_length());
+//OLTODO
 
 err_with_mdl:
   /*

@@ -1,0 +1,220 @@
+Just a prototype maybe be stupid too
+but I have to try it na
+
+
+Read view same time on master and slave gtid
+create prepare point
+
+So it will be enclosed like this
+
+Start
+Alter
+End
+
+Prepare { Gtid will be there}
+Commit  {Gtid will be there}
+so Alter will be in gtid commit
+
+
+So to proceed with prototype
+look how xa prepare is sandwiched between gtid and commit
+in short look xa prepare/coomit are recorded in binlog
+
+then look when we create read view and then send the prepare event encapsulated
+in gtid.
+
+GTID_BLOCK
+Gtid
+XA START
+
+QUERY_BLOCK/ROW_BLOCK
+Query/Write/Dml
+
+QUERY_LOG_EVENT BLOCK
+XA END
+
+XID_PREPARE_EVENT
+XA Prepare
+
+GTID_BLOCK
+gtid
+/TODO
+XA COMMIT
+
+
+
+
+
+Prototype
+
+Wait for read view
+create the prepapre event and send it
+
+
+
+MASTER
+
+W1
+W2
+A_1
+W3
+W4
+W5
+6A_2C
+W7
+W8
+
+Slave
+Prepare
+W1
+A_1
+W2
+W3
+W4
+W5
+WA_2C
+W7
+W8
+
+Slave Commit
+W1
+W2
+A_1
+W3
+W4
+W5
+6A_2C
+W7
+W8
+
+
+For now should be executed in TOI mode, no other exclusive stuff
+
+
+XA START ALTER_THREAD_ID
+ALTER
+XA END
+Prepare
+
+Commit
+
+
+
+
+
+
+
+New Design
+
+Start 'Gtid_seq_no_constant'   ' part_no_1' Command_1
+Start 'Gtid_seq_no_constant'   ' part_no_2' Command_2
+.
+.
+.
+.
+Start 'Gtid_seq_no_constant'   ' part_no_N' Command_N
+Commit 'Gtid_seq_no_constant'  'part_no_N+1'
+
+Gtid_seq_no_constant= Gtid_seq no of Command1
+
+What about domain id ?
+We can have something like this 'x-x-x' Whole gtid instead of seq_no
+
+For the just stick with normal alter
+
+START 'thread_id' ALTER
+COMMIT 'thred_id'
+>>>>Replace thread_id with starting gtid and partno
+
+Next stage artifical commit
+
+
+Slave t.1
+start ALTER 
+Complete prepare phase
+SEND PREPARE N
+WAIT FOR COMMIt/ROLLBACK N Signal
+COMMIT/ROLLBACK
+
+Slave t.2
+Commit N
+Wait for PREPARE N
+Send COMMIT N
+
+
+ROLLABACK
+Wait for PREPARE N
+SEND ROLLBACK N Signal
+
+
+
+
+No nothing like that , Start alter should commit, But we will preserve thread context
+
+Lets assume simple case
+M         S
+|         |
+S.A(t.1)  |
+|        S.A(thread_1)
+C(t.1)    Waiting
+|         C(thread_2)
+
+
+So Something Like this
+
+On Slave
+
+Parent thread
+|
+S.A
+Prepare Alter
+Fork                  Slave Thread
+|                         |
+Do fake Commit            Wait_of_commit signal N
+|                         Do Commit N
+                          Exit
+
+
+
+
+
+On MASTER
+START ALTER......
+COMMIT ALTER....
+ROLLBACK ALTER ....
+
+
+
+On Slave
+START ALTER
+COMMIT ALTER...
+COMMIT query_id ALTER (Will be issued by DBA)
+ROLLBACK ALTER...
+ROLLBACK query_id ALTER (Will be issued by DBA)
+
+
+
+W.SA                                   W.C/R
+SA                                      |
+Global Str flg SA(channel_name + id)    |
+SIGNAL                                  |
+WAIT                                    |
+|                                       check global struc (channel_name + id)
+|                                       Signal
+COMMIT
+
+
+
+GLOBAL ARRAY of size worker num (wrt to channel)
+[0][0][0][0][1][1][1][0][0]  -1, 0, error
+ W..W..W........W........
+
+
+
+
+
+START ALTER STRUCTURE
+
+thread_id(key)
+status  WAITING, ROLLBACK, COMMIT
+error 0, UINT32_MAX

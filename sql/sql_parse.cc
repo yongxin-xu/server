@@ -5636,6 +5636,20 @@ mysql_execute_command(THD *thd)
     my_ok(thd);
     break;
   }
+  case SQLCOM_COMMIT_PREVIOUS:
+  {
+    DBUG_ASSERT(thd->rgi_slave);
+    Master_info *mi= thd->rgi_slave->rli->mi;
+    start_alter_info *info;
+    List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
+    while ((info= info_iterator++))
+      if(info->thread_id == thd->lex->previous_commit_id)
+        break;
+    // I dont need mutex lock here
+    info->state= start_alter_state::COMMIT_ALTER;
+    mysql_cond_broadcast(&mi->start_alter_cond);
+    break;
+  }
   case SQLCOM_ROLLBACK:
   {
     DBUG_ASSERT(thd->lock == NULL ||
@@ -5671,6 +5685,11 @@ mysql_execute_command(THD *thd)
       thd->set_killed(KILL_CONNECTION);
     my_ok(thd);
    break;
+  }
+  case SQLCOM_ROLLBACK_PREVIOUS:
+  {
+
+    break;
   }
   case SQLCOM_RELEASE_SAVEPOINT:
     if (trans_release_savepoint(thd, lex->ident))
