@@ -4735,8 +4735,8 @@ TABLE *open_purge_table(THD *thd, const char *db,
 
   Open_table_context ot_ctx(thd, MYSQL_OPEN_HAS_MDL_LOCK);
   TABLE_LIST *tl= (TABLE_LIST*)thd->alloc(sizeof(TABLE_LIST));
-  LEX_CSTRING db_name= {db, sizeof(db) };
-  LEX_CSTRING table_name= { tb, sizeof(tb) };
+  LEX_CSTRING db_name= {db, strlen(db) };
+  LEX_CSTRING table_name= { tb, strlen(tb) };
 
   tl->init_one_table(&db_name, &table_name, 0, TL_READ);
   tl->i_s_requested_object= OPEN_TABLE_ONLY;
@@ -4772,8 +4772,8 @@ TABLE *find_fk_open_table(THD *thd, const char *db,
 {
   for (TABLE *t= thd->open_tables; t; t= t->next)
   {
-    if (t->s->db.length == sizeof(db) &&
-        t->s->table_name.length == sizeof(table) &&
+    if (t->s->db.length == strlen(db) &&
+        t->s->table_name.length == strlen(table) &&
         !strcmp(t->s->db.str, db) && !strcmp(t->s->table_name.str, table) &&
         t->pos_in_table_list->prelocking_placeholder == TABLE_LIST::PRELOCK_FK)
       return t;
