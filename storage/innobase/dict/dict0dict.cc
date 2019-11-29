@@ -767,19 +767,34 @@ bool dict_parse_tbl_name(const char* tbl_name,
   return true;
 }
 
+
+template dict_table_t*
+dict_acquire_mdl_shared<true>(dict_table_t* table,
+                              THD* thd,
+                              MDL_ticket** mdl,
+			      bool dict_locked,
+			      dict_table_op_t table_op);
+
+template dict_table_t*
+dict_acquire_mdl_shared<false>(dict_table_t* table,
+                               THD* thd,
+                               MDL_ticket** mdl,
+			       bool dict_locked,
+			       dict_table_op_t	table_op);
+
 /** Acquire MDL shared for the table name.
 @param[in]	table		table object
 @param[in]	dict_locked	data dictionary locked
-@param[in]	table_op	operation to perform
 @param[in]	thd		background thread
 @param[in]	mdl		mdl ticket
 @return table object after locking mdl shared. */
-static dict_table_t*
+template<bool no_wait=false>
+dict_table_t*
 dict_acquire_mdl_shared(dict_table_t* table,
-                        bool dict_locked,
-                        dict_table_op_t	table_op,
                         THD* thd,
-                        MDL_ticket** mdl)
+                        MDL_ticket** mdl,
+			bool dict_locked,
+			dict_table_op_t	table_op)
 {
   if (table == NULL || mdl == NULL)
     return table;
@@ -809,13 +824,23 @@ retry_mdl:
     unaccessible= true;
   }
 
-  table->release();
+  if (!no_wait)
+    table->release();
 
   if (unaccessible)
     return NULL;
 
-  if (!acquire_shared_table_mdl(thd, db_buf, tbl_buf, mdl))
+  if (no_wait)
+  {
+    if (acquire_shared_table_mdl<true>(thd, db_buf, tbl_buf, mdl))
+      return NULL;
     mdl_acquire= true;
+  }
+  else
+  {
+    if (!acquire_shared_table_mdl(thd, db_buf, tbl_buf, mdl))
+      mdl_acquire= true;
+  }
 
   table= dict_table_open_on_id(table_id, dict_locked, table_op);
 
@@ -896,7 +921,7 @@ dict_table_open_on_id(
 			table, table_op == DICT_TABLE_OP_DROP_ORPHAN);
 	}
 
-	return dict_acquire_mdl_shared(table, dict_locked, table_op, thd, mdl);
+	return dict_acquire_mdl_shared(table, thd, mdl, dict_locked, table_op);
 }
 
 /********************************************************************//**

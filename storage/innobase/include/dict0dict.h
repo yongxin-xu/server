@@ -127,6 +127,20 @@ bool dict_parse_tbl_name(const char* tbl_name,
                          char (&mysql_db_name)[NAME_LEN + 1],
                          char (&mysql_tbl_name)[NAME_LEN + 1]);
 
+/** Acquire MDL shared for the table name.
+@param[in]	table		table object
+@param[in]	dict_locked	data dictionary locked
+@param[in]	thd		background thread
+@param[in]	mdl		mdl ticket
+@return table object after locking mdl shared. */
+template<bool no_wait=false>
+dict_table_t*
+dict_acquire_mdl_shared(dict_table_t* table,
+                        THD* thd,
+                        MDL_ticket** mdl,
+			bool dict_locked = false,
+			dict_table_op_t	table_op = DICT_TABLE_OP_NORMAL);
+
 /** Returns a table object based on table id and it does MDL for
 the table depends on the MDL_ticket parameter.
 @param[in]	table_id

@@ -1117,6 +1117,7 @@ void mdl_dbug_print_locks();
   @param out_mdl_ticket	pointer to MDL_ticket upon successful lock
 			attempt
 */
+template<bool no_wait=false>
 bool acquire_shared_table_mdl(THD *thd, const char *db_name,
                               const char *tbl_name,
                               MDL_ticket **out_mdl_ticket);

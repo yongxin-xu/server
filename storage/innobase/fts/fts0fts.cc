@@ -833,10 +833,6 @@ fts_drop_index(
 		doc_id_t	current_doc_id;
 		doc_id_t	first_doc_id;
 
-		/* If we are dropping the only FTS index of the table,
-		remove it from optimize thread */
-		fts_optimize_remove_table(table);
-
 		DICT_TF2_FLAG_UNSET(table, DICT_TF2_FTS);
 
 		/* If Doc ID column is not added internally by FTS index,
@@ -5323,7 +5319,7 @@ fts_t::fts_t(
 	bg_threads(0),
 	add_wq(NULL),
 	cache(NULL),
-	doc_col(ULINT_UNDEFINED), in_queue(false),
+	doc_col(ULINT_UNDEFINED), in_queue(false), sync_message(false),
 	fts_heap(heap)
 {
 	ut_a(table->fts == NULL);
