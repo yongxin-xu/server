@@ -3,6 +3,7 @@
 --echo #
 
 --source include/have_sequence.inc
+--source include/have_64bit.inc
 
 CREATE TABLE t1(a int, b varchar(255), c varchar(255));
 INSERT into t1 SELECT seq, repeat('a', seq%10), repeat('b', seq%10)
@@ -85,3 +86,97 @@ SELECT JSON_DETAILED(JSON_EXTRACT(trace, '$**.filesort_summary')) from INFORMATI
 
 DROP TABLE t1;
 
+CREATE TABLE t1 (
+ id int(10) unsigned NOT NULL auto_increment,
+ k int(10) unsigned NOT NULL default '0',
+ c char(120) NOT NULL default '',
+ pad char(60) NOT NULL default '',
+ PRIMARY KEY (id),
+ KEY k (k)
+);
+
+--disable_query_log
+let $count= 140;
+while ($count)
+{
+  eval insert into t1(id, k) values ($count, $count);
+  dec $count;
+}
+--enable_query_log
+
+ANALYZE TABLE t1;
+
+SET @@session.sort_buffer_size=32768;
+
+FLUSH STATUS;
+SHOW SESSION STATUS LIKE 'Sort%';
+
+--disable_result_log
+# This is similar to sysbench --oltp-order-ranges --oltp-range-size=1000
+# With packed addon fields, we should get Sort_merge_passes = 0
+SELECT c FROM t1 WHERE id between 2 and 1002 ORDER BY c;
+--enable_result_log
+
+SHOW SESSION STATUS LIKE 'Sort%';
+SET @@session.sort_buffer_size=DEFAULT;
+
+DROP TABLE t1;
+
+--echo #
+--echo #  Test to cover merge_buffers
+--echo #
+
+CREATE TABLE t1 (
+  id int NOT NULL auto_increment PRIMARY KEY,
+  b int NOT NULL,
+  c datetime NOT NULL,
+  INDEX idx_b(b),
+  INDEX idx_c(c)
+);
+
+CREATE TABLE t2 (
+  b int NOT NULL auto_increment PRIMARY KEY,
+  c datetime NOT NULL
+);
+
+INSERT INTO t2(c) VALUES ('2007-01-01');
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+INSERT INTO t2(c) SELECT c FROM t2;
+
+INSERT INTO t1(b,c) SELECT b,c FROM t2;
+UPDATE t2 SET c='2007-01-02';
+INSERT INTO t1(b,c) SELECT b,c FROM t2;
+UPDATE t2 SET c='2007-01-03';
+
+-- disable_query_log
+-- disable_result_log
+ANALYZE TABLE t1;
+ANALYZE TABLE t2;
+-- enable_result_log
+-- enable_query_log
+
+set @@sort_buffer_size=8192;
+
+SELECT COUNT(*) FROM t1;
+
+--replace_column 10 #
+EXPLAIN
+SELECT COUNT(*) FROM t1 FORCE INDEX(idx_b, idx_c)
+  WHERE (c >= '2007-01-02' AND c <= '2007-01-03') OR b >= 1;
+
+flush status;
+SELECT COUNT(*) FROM t1 FORCE INDEX(idx_b, idx_c)
+  WHERE (c >= '2007-01-02' AND c <= '2007-01-03') OR b >= 1;
+
+show status like '%sort%';
+
+set @@sort_buffer_size=default;
+drop table t1,t2;

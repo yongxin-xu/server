@@ -99,6 +99,7 @@ public:
   void free_data()
   {
     close_cached_file(&io_cache);
+    free_addon_buff();
     my_free(record_pointers);
     my_free(buffpek.str);
     my_free(addon_fields);
@@ -113,6 +114,8 @@ public:
     addon_fields= 0;
     sorted_result_in_fsbuf= false;
   }
+
+  void free_addon_buff();
 
 
   IO_CACHE  io_cache;           /* If sorted through filesort */
@@ -165,12 +168,14 @@ public:
   void adjust_next_record_pointer(uint val)
   { filesort_buffer.adjust_next_record_pointer(val); }
 
-  uchar *get_raw_buf()
+  Bounds_checked_array<uchar> get_raw_buf()
   { return filesort_buffer.get_raw_buf(); }
 
   size_t sort_buffer_size() const
   { return filesort_buffer.sort_buffer_size(); }
 
+  bool is_allocated() const
+  { return filesort_buffer.is_allocated(); }
   void set_sort_length(uint val)
   { filesort_buffer.set_sort_length(val); }
   uint get_sort_length() const

@@ -168,6 +168,11 @@ public:
     return m_size_in_bytes;
   }
 
+  bool is_allocated() const
+  {
+    return m_rawmem;
+  }
+
   /**
     Allocates the buffer, but does *not* initialize pointers.
     Total size = (num_records * record_length) + (num_records * sizeof(pointer))
@@ -211,9 +216,9 @@ public:
     @returns The entire buffer, as a character array.
     This is for reusing the memory for merge buffers.
    */
-  uchar *get_raw_buf()
+  Bounds_checked_array<uchar> get_raw_buf()
   {
-    return m_rawmem;
+    return Bounds_checked_array<uchar>(m_rawmem, m_size_in_bytes);
   }
 
   /**

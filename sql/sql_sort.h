@@ -20,8 +20,6 @@
 #include <my_sys.h>                             /* qsort2_cmp */
 #include "queues.h"
 
-typedef struct st_buffpek BUFFPEK;
-
 struct SORT_FIELD;
 class Field;
 struct TABLE;
@@ -63,6 +61,88 @@ struct BUFFPEK_COMPARE_CONTEXT
   void *key_compare_arg;
 };
 
+struct Merge_chunk {
+public:
+  Merge_chunk(): m_current_key(NULL),
+                 m_file_position(0),
+                 m_buffer_start(NULL),
+                 m_buffer_end(NULL),
+                 m_rowcount(0),
+                 m_mem_count(0),
+                 m_max_keys(0)
+  {}
+
+  my_off_t file_position() const { return m_file_position; }
+  void set_file_position(my_off_t val) { m_file_position= val; }
+  void advance_file_position(my_off_t val) { m_file_position+= val; }
+
+  uchar *buffer_start() { return m_buffer_start; }
+  const uchar *buffer_end() const { return m_buffer_end; }
+
+  void set_buffer(uchar *start, uchar *end)
+  {
+    m_buffer_start= start;
+    m_buffer_end= end;
+  }
+  void set_buffer_start(uchar *start)
+  {
+    m_buffer_start= start;
+  }
+  void set_buffer_end(uchar *end)
+  {
+    DBUG_ASSERT(m_buffer_end == NULL || end <= m_buffer_end);
+    m_buffer_end= end;
+  }
+
+  void init_current_key() { m_current_key= m_buffer_start; }
+  uchar *current_key() { return m_current_key; }
+  void advance_current_key(uint val) { m_current_key+= val; }
+
+  void decrement_rowcount(ha_rows val) { m_rowcount-= val; }
+  void set_rowcount(ha_rows val)       { m_rowcount= val; }
+  ha_rows rowcount() const             { return m_rowcount; }
+
+  ha_rows mem_count() const { return m_mem_count; }
+  void set_mem_count(ha_rows val) { m_mem_count= val; }
+  ha_rows decrement_mem_count() { return --m_mem_count; }
+
+  ha_rows max_keys() const { return m_max_keys; }
+  void set_max_keys(ha_rows val) { m_max_keys= val; }
+
+  size_t  buffer_size() const { return m_buffer_end - m_buffer_start; }
+
+  /**
+    Tries to merge *this with *mc, returns true if successful.
+    The assumption is that *this is no longer in use,
+    and the space it has been allocated can be handed over to a
+    buffer which is adjacent to it.
+   */
+  bool merge_freed_buff(Merge_chunk *mc) const
+  {
+    if (mc->m_buffer_end == m_buffer_start)
+    {
+      mc->m_buffer_end= m_buffer_end;
+      mc->m_max_keys+= m_max_keys;
+      return true;
+    }
+    else if (mc->m_buffer_start == m_buffer_end)
+    {
+      mc->m_buffer_start= m_buffer_start;
+      mc->m_max_keys+= m_max_keys;
+      return true;
+    }
+    return false;
+  }
+
+  uchar   *m_current_key;  /// The current key for this chunk.
+  my_off_t m_file_position;/// Current position in the file to be sorted.
+  uchar   *m_buffer_start; /// Start of main-memory buffer for this chunk.
+  uchar   *m_buffer_end;   /// End of main-memory buffer for this chunk.
+  ha_rows  m_rowcount;     /// Number of unread rows in this chunk.
+  ha_rows  m_mem_count;    /// Number of rows in the main-memory buffer.
+  ha_rows  m_max_keys;     /// If we have fixed-size rows:
+                           ///    max number of rows in buffer.
+};
 
 typedef Bounds_checked_array<SORT_ADDON_FIELD> Addon_fields_array;
 
@@ -78,8 +158,8 @@ class Addon_fields {
 public:
   Addon_fields(Addon_fields_array arr)
     : m_field_descriptors(arr),
-      m_addon_buf(NULL),
-      m_addon_buf_length(0),
+      m_addon_buf(),
+      m_addon_buf_length(),
       m_using_packed_addons(false)
   {
     DBUG_ASSERT(!arr.is_null());
@@ -87,25 +167,24 @@ public:
 
   SORT_ADDON_FIELD *begin() { return m_field_descriptors.begin(); }
   SORT_ADDON_FIELD *end()   { return m_field_descriptors.end(); }
-  size_t num_field_descriptors() const { return m_field_descriptors.size(); }
 
-/*
-  /// rr_unpack_from_tempfile needs an extra buffer when unpacking.
+    /// rr_unpack_from_tempfile needs an extra buffer when unpacking.
   uchar *allocate_addon_buf(uint sz)
   {
-    if (m_addon_buf != NULL)
-    {
-      DBUG_ASSERT(m_addon_buf_length == sz);
-      return m_addon_buf;
-    }
-    m_addon_buf= static_cast<uchar*>(sql_alloc(sz));
+    m_addon_buf= (uchar *)my_malloc(sz, MYF(MY_WME | MY_THREAD_SPECIFIC));
     if (m_addon_buf)
       m_addon_buf_length= sz;
     return m_addon_buf;
   }
-*/
 
-  uchar *get_addon_buf()              { return m_addon_buf; }
+  void free_addon_buff()
+  {
+    my_free(m_addon_buf);
+    m_addon_buf= NULL;
+    m_addon_buf_length= 0;
+  }
+
+  uchar *get_addon_buf() { return m_addon_buf; }
   uint   get_addon_buf_length() const { return m_addon_buf_length; }
 
   void set_using_packed_addons(bool val)
@@ -165,10 +244,12 @@ public:
   ha_rows max_rows;           // Select limit, or HA_POS_ERROR if unlimited.
   ha_rows examined_rows;      // Number of examined rows.
   TABLE *sort_form;           // For quicker make_sortkey.
-  SORT_FIELD *local_sortorder;
-  SORT_FIELD *end;
+  /**
+    ORDER BY list with some precalculated info for filesort.
+    Array is created and owned by a Filesort instance.
+   */
+  Bounds_checked_array<SORT_FIELD> local_sortorder;
   Addon_fields *addon_fields;     // Descriptors for companion fields.
-  LEX_STRING addon_buf;          // Buffer & length of added packed fields.
   bool using_pq;
 
   uchar *unique_buff;
@@ -227,19 +308,19 @@ private:
   bool m_using_packed_addons; ///< caches the value of using_packed_addons()
 };
 
+typedef Bounds_checked_array<uchar> Sort_buffer;
 
-int merge_many_buff(Sort_param *param, uchar *sort_buffer, size_t buff_size,
-		    BUFFPEK *buffpek,
-		    uint *maxbuffer, IO_CACHE *t_file);
-ulong read_to_buffer(IO_CACHE *fromfile,BUFFPEK *buffpek,
+int merge_many_buff(Sort_param *param, Sort_buffer sort_buffer,
+                    Merge_chunk *buffpek, uint *maxbuffer, IO_CACHE *t_file);
+ulong read_to_buffer(IO_CACHE *fromfile, Merge_chunk *buffpek,
                      Sort_param *param);
 bool merge_buffers(Sort_param *param,IO_CACHE *from_file,
-                   IO_CACHE *to_file, uchar *sort_buffer, size_t buff_size,
-                   BUFFPEK *lastbuff,BUFFPEK *Fb,
-                   BUFFPEK *Tb,int flag);
-int merge_index(Sort_param *param, uchar *sort_buffer, size_t buff_size,
-		BUFFPEK *buffpek, uint maxbuffer,
-		IO_CACHE *tempfile, IO_CACHE *outfile);
-void reuse_freed_buff(QUEUE *queue, BUFFPEK *reuse, uint key_length);
+                   IO_CACHE *to_file, Sort_buffer sort_buffer,
+                   Merge_chunk *lastbuff, Merge_chunk *Fb,
+                   Merge_chunk *Tb, int flag);
+int merge_index(Sort_param *param, Sort_buffer sort_buffer,
+                Merge_chunk *buffpek, uint maxbuffer,
+                IO_CACHE *tempfile, IO_CACHE *outfile);
+void reuse_freed_buff(QUEUE *queue, Merge_chunk *reuse, uint key_length);
 
 #endif /* SQL_SORT_INCLUDED */
