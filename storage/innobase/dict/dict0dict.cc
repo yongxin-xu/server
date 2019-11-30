@@ -768,42 +768,30 @@ bool dict_parse_tbl_name(const char* tbl_name,
 }
 
 
-template dict_table_t*
-dict_acquire_mdl_shared<true>(dict_table_t* table,
-                              THD* thd,
-                              MDL_ticket** mdl,
-			      bool dict_locked,
-			      dict_table_op_t table_op);
-
-template dict_table_t*
-dict_acquire_mdl_shared<false>(dict_table_t* table,
-                               THD* thd,
-                               MDL_ticket** mdl,
-			       bool dict_locked,
-			       dict_table_op_t	table_op);
-
 /** Acquire MDL shared for the table name.
-@param[in]	table		table object
-@param[in]	dict_locked	data dictionary locked
-@param[in]	thd		background thread
-@param[in]	mdl		mdl ticket
-@return table object after locking mdl shared. */
-template<bool no_wait=false>
+@tparam trylock whether to use non-blocking operation
+@param[in,out]  table           table object
+@param[in,out]  thd             background thread
+@param[out]     mdl             mdl ticket
+@param[in]      dict_locked     data dictionary locked
+@param[in]      table_op        operation to perform when opening
+@return table object after locking MDL shared
+@retval NULL if the table is not readable, or if trylock && MDL blocked */
+template<bool trylock>
 dict_table_t*
-dict_acquire_mdl_shared(dict_table_t* table,
-                        THD* thd,
-                        MDL_ticket** mdl,
-			bool dict_locked,
-			dict_table_op_t	table_op)
+dict_acquire_mdl_shared(dict_table_t *table,
+                        THD *thd,
+                        MDL_ticket **mdl,
+                        bool dict_locked,
+                        dict_table_op_t table_op)
 {
-  if (table == NULL || mdl == NULL)
+  if (!table || !mdl)
     return table;
 
   ulint db_len= dict_get_db_name_len(table->name.m_name);
 
   if (db_len == 0)
-    /* InnoDB system table */
-    return table;
+    return table; /* InnoDB system tables are not covered by MDL */
 
   table_id_t table_id= table->id;
   char db_buf[NAME_LEN + 1], db_buf1[NAME_LEN + 1];
@@ -824,16 +812,16 @@ retry_mdl:
     unaccessible= true;
   }
 
-  if (!no_wait)
+  if (!trylock)
     table->release();
 
   if (unaccessible)
-    return NULL;
+    return nullptr;
 
-  if (no_wait)
+  if (trylock)
   {
     if (acquire_shared_table_mdl<true>(thd, db_buf, tbl_buf, mdl))
-      return NULL;
+      return nullptr;
     mdl_acquire= true;
   }
   else
@@ -850,8 +838,8 @@ retry_mdl:
     if (mdl_acquire)
       release_mdl(thd, *mdl);
 
-    *mdl= NULL;
-    return NULL;
+    *mdl= nullptr;
+    return nullptr;
   }
 
   if (!fil_table_accessible(table))
@@ -865,8 +853,7 @@ retry_mdl:
 
   dict_parse_tbl_name(table->name.m_name, db_buf1, tbl_buf1);
 
-  if (mdl_acquire && strcmp(db_buf, db_buf1) == 0
-      && strcmp(tbl_buf, tbl_buf1) == 0)
+  if (mdl_acquire && !strcmp(db_buf, db_buf1) && !strcmp(tbl_buf, tbl_buf1))
     return table;
 
   /* Table is renamed. so release mdl lock for old name and
@@ -879,22 +866,21 @@ retry_mdl:
   goto retry_mdl;
 }
 
-/** Returns a table object based on table id and it does shared MDL depends
-on the parameter MDL_ticket.
-@param[in]	table_id	table identifier
-@param[in]	dict_locked	data dictionary locked
-@param[in]	table_op	operation to perform
-@param[in,out]	thd		background thread or NULL if
-				the current thread is foreground thread
-@param[in,out]	mdl		meta data lock
+template dict_table_t*
+dict_acquire_mdl_shared<true>(dict_table_t*, THD*, MDL_ticket**, bool,
+                              dict_table_op_t);
+
+/** Look up a table by numeric identifier.
+@param[in]      table_id        table identifier
+@param[in]      dict_locked     data dictionary locked
+@param[in]      table_op        operation to perform when opening
+@param[in,out]  thd             background thread, or NULL to not acquire MDL
+@param[out]     mdl             mdl ticket, or NULL
 @return table, NULL if does not exist */
 dict_table_t*
-dict_table_open_on_id(
-	table_id_t	table_id,
-	bool		dict_locked,
-	dict_table_op_t	table_op,
-	THD*		thd,
-	MDL_ticket**	mdl)
+dict_table_open_on_id(table_id_t table_id, bool dict_locked,
+                      dict_table_op_t table_op, THD *thd,
+                      MDL_ticket **mdl)
 {
 	dict_table_t*	table;
 
@@ -921,7 +907,8 @@ dict_table_open_on_id(
 			table, table_op == DICT_TABLE_OP_DROP_ORPHAN);
 	}
 
-	return dict_acquire_mdl_shared(table, thd, mdl, dict_locked, table_op);
+	return dict_acquire_mdl_shared<false>(table, thd, mdl, dict_locked,
+					      table_op);
 }
 
 /********************************************************************//**

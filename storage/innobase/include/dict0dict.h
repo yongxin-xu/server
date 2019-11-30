@@ -128,31 +128,34 @@ bool dict_parse_tbl_name(const char* tbl_name,
                          char (&mysql_tbl_name)[NAME_LEN + 1]);
 
 /** Acquire MDL shared for the table name.
-@param[in]	table		table object
-@param[in]	dict_locked	data dictionary locked
-@param[in]	thd		background thread
-@param[in]	mdl		mdl ticket
-@return table object after locking mdl shared. */
-template<bool no_wait=false>
+@tparam trylock whether to use non-blocking operation
+@param[in,out]  table           table object
+@param[in,out]  thd             background thread
+@param[out]     mdl             mdl ticket
+@param[in]      dict_locked     data dictionary locked
+@param[in]      table_op        operation to perform when opening
+@return table object after locking MDL shared
+@retval NULL if the table is not readable, or if trylock && MDL blocked */
+template<bool trylock>
 dict_table_t*
-dict_acquire_mdl_shared(dict_table_t* table,
-                        THD* thd,
-                        MDL_ticket** mdl,
-			bool dict_locked = false,
-			dict_table_op_t	table_op = DICT_TABLE_OP_NORMAL);
+dict_acquire_mdl_shared(dict_table_t *table,
+                        THD *thd,
+                        MDL_ticket **mdl,
+                        bool dict_locked= false,
+                        dict_table_op_t table_op= DICT_TABLE_OP_NORMAL);
 
-/** Returns a table object based on table id and it does MDL for
-the table depends on the MDL_ticket parameter.
-@param[in]	table_id
+/** Look up a table by numeric identifier.
+@param[in]      table_id        table identifier
+@param[in]      dict_locked     data dictionary locked
+@param[in]      table_op        operation to perform when opening
+@param[in,out]  thd             background thread, or NULL to not acquire MDL
+@param[out]     mdl             mdl ticket, or NULL
 @return table, NULL if does not exist */
 dict_table_t*
-dict_table_open_on_id(
-	table_id_t	table_id,
-	bool		dict_locked,
-	dict_table_op_t	table_op,
-	THD*		thd = NULL,
-	MDL_ticket**	mdl = NULL)
-	MY_ATTRIBUTE((warn_unused_result));
+dict_table_open_on_id(table_id_t table_id, bool dict_locked,
+                      dict_table_op_t table_op, THD *thd= nullptr,
+                      MDL_ticket **mdl= nullptr)
+  MY_ATTRIBUTE((warn_unused_result));
 
 /**********************************************************************//**
 Returns a table object based on table id.
