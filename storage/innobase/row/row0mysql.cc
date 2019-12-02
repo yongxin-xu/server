@@ -3510,7 +3510,7 @@ defer:
 		close the table. But drop table table acquires
 		dict_sys->mutex. */
 		if (!is_temp_name
-		    || strcmp(table->name.basename(), "#sql2")) {
+		    || strstr(table->name.m_name, "/#sql2")) {
 			heap = mem_heap_create(FN_REFLEN);
 			const char* tmp_name
 				= dict_mem_create_temporary_tablename(
