@@ -145,7 +145,6 @@ a
 2
 SELECT * FROM information_schema.check_constraints;
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	TABLE_NAME	CONSTRAINT_NAME	CHECK_CLAUSE
-def	db	t1	CONSTRAINT_1	`b` > 0
 connection default;
 DROP USER foo;
 DROP DATABASE db;
