@@ -163,3 +163,18 @@ drop function f;
 drop function g;
 drop function h;
 drop procedure log;
+
+--echo #
+--echo # MDEV-18929 2nd execution of SP does not detect ER_VERS_NOT_VERSIONED
+--echo #
+create or replace table t1 (a int, s date, e date, period for app(s,e));
+create or replace procedure sp() update t1 for portion of app from '2019-01-01' to '2019-12-31' set a = 0;
+lock table t1 read;
+--error ER_TABLE_NOT_LOCKED_FOR_WRITE
+call sp;
+unlock tables;
+call sp;
+
+# cleanup
+drop procedure sp;
+drop table t1;

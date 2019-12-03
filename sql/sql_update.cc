@@ -191,10 +191,12 @@ static bool check_fields(THD *thd, TABLE_LIST *table, List<Item> &items,
       return TRUE;
     }
     DBUG_ASSERT(thd->lex->sql_command == SQLCOM_UPDATE);
+    vers_select_conds_t &period= table->period_conditions;
+    DBUG_ASSERT(period.field_start);
+    DBUG_ASSERT(period.field_end);
     for (List_iterator_fast<Item> it(items); (item=it++);)
     {
       Field *f= item->field_for_view_update()->field;
-      vers_select_conds_t &period= table->period_conditions;
       if (period.field_start->field == f || period.field_end->field == f)
       {
         my_error(ER_PERIOD_COLUMNS_UPDATED, MYF(0),

@@ -1958,6 +1958,8 @@ struct vers_select_conds_t
     delete_history= false;
     start.empty();
     end.empty();
+    field_start= NULL;
+    field_end= NULL;
   }
 
   void init(vers_system_time_t _type,

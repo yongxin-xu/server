@@ -274,3 +274,15 @@ drop function f;
 drop function g;
 drop function h;
 drop procedure log;
+#
+# MDEV-18929 2nd execution of SP does not detect ER_VERS_NOT_VERSIONED
+#
+create or replace table t1 (a int, s date, e date, period for app(s,e));
+create or replace procedure sp() update t1 for portion of app from '2019-01-01' to '2019-12-31' set a = 0;
+lock table t1 read;
+call sp;
+ERROR HY000: Table 't1' was locked with a READ lock and can't be updated
+unlock tables;
+call sp;
+drop procedure sp;
+drop table t1;
