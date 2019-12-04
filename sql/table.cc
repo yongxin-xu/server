@@ -9428,7 +9428,9 @@ bool TABLE_SHARE::update_foreign_keys(THD *thd, Alter_info *alter_info)
     {
       MDL_request_list::Iterator it(mdl_list);
       while (MDL_request *req= it++)
-        tdc_remove_table(thd, TDC_RT_REMOVE_ALL, req->key.db_name(), req->key.name(), false);
+        if (tdc_remove_table(thd, TDC_RT_REMOVE_ALL, req->key.db_name(),
+                             req->key.name(), false))
+          return true;
     }
   }
   return false;
@@ -9533,7 +9535,9 @@ bool release_ref_shares(THD *thd, TABLE_LIST *t)
 
     MDL_request_list::Iterator req_it(mdl_list);
     while (MDL_request *req= req_it++)
-      tdc_remove_table(thd, TDC_RT_REMOVE_ALL, req->key.db_name(), req->key.name(), FALSE);
+      if (tdc_remove_table(thd, TDC_RT_REMOVE_ALL, req->key.db_name(),
+                           req->key.name(), false))
+        return true;
   }
   return false;
 }

@@ -645,8 +645,12 @@ bool mysql_create_view(THD *thd, TABLE_LIST *views,
     meta-data changes after ALTER VIEW.
   */
 
-  if (!res)
-    tdc_remove_table(thd, TDC_RT_REMOVE_ALL, view->db.str, view->table_name.str, false);
+  if (!res && tdc_remove_table(thd, TDC_RT_REMOVE_ALL, view->db.str,
+                               view->table_name.str, false))
+  {
+    res= true;
+    goto err;
+  }
 
   if (!res && mysql_bin_log.is_open())
   {
@@ -1853,8 +1857,9 @@ bool mysql_drop_view(THD *thd, TABLE_LIST *views, enum_drop_mode drop_mode)
       For a view, there is a TABLE_SHARE object.
       Remove it from the table definition cache, in case the view was cached.
     */
-    tdc_remove_table(thd, TDC_RT_REMOVE_ALL, view->db.str, view->table_name.str,
-                     FALSE);
+    if (unlikely(tdc_remove_table(thd, TDC_RT_REMOVE_ALL, view->db.str,
+                 view->table_name.str, FALSE)))
+      DBUG_RETURN(TRUE);
     query_cache_invalidate3(thd, view, 0);
     sp_cache_invalidate();
   }
