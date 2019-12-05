@@ -160,7 +160,7 @@ purge_graph_build()
 void purge_sys_t::create()
 {
   ut_ad(this == &purge_sys);
-  ut_ad(!m_heap);
+  ut_ad(!heap);
   ut_ad(!enabled());
   m_paused= 0;
   query= purge_graph_build();
@@ -174,14 +174,14 @@ void purge_sys_t::create()
   mutex_create(LATCH_ID_PURGE_SYS_PQ, &pq_mutex);
   truncate.current= NULL;
   truncate.last= NULL;
-  m_heap= mem_heap_create(4096);
+  heap= mem_heap_create(4096);
 }
 
 /** Close the purge subsystem on shutdown. */
 void purge_sys_t::close()
 {
   ut_ad(this == &purge_sys);
-  if (!m_heap)
+  if (!heap)
     return;
 
   ut_ad(!enabled());
@@ -193,8 +193,8 @@ void purge_sys_t::close()
   trx_free(trx);
   rw_lock_free(&latch);
   mutex_free(&pq_mutex);
-  mem_heap_free(m_heap);
-  m_heap= NULL;
+  mem_heap_free(heap);
+  heap= nullptr;
 }
 
 /*================ UNDO LOG HISTORY LIST =============================*/
@@ -1136,9 +1136,8 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 	i = 0;
 
 	const ulint		batch_size = srv_purge_batch_size;
-	mem_heap_t*		heap = purge_sys.m_heap;
 	std::map<table_id_t, purge_node_t*>	table_id_map;
-	mem_heap_empty(heap);
+	mem_heap_empty(purge_sys.heap);
 
 	while (UNIV_LIKELY(srv_undo_sources) || !srv_fast_shutdown) {
 		purge_node_t*		node;
@@ -1151,7 +1150,7 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 		ut_a(que_node_get_type(node) == QUE_NODE_PURGE);
 
 		purge_rec = static_cast<trx_purge_rec_t*>(
-			mem_heap_zalloc(heap, sizeof(*purge_rec)));
+			mem_heap_zalloc(purge_sys.heap, sizeof(*purge_rec)));
 
 		/* Track the max {trx_id, undo_no} for truncating the
 		UNDO logs once we have purged the records. */
@@ -1162,7 +1161,8 @@ trx_purge_attach_undo_recs(ulint n_purge_threads)
 
 		/* Fetch the next record, and advance the purge_sys.tail. */
 		purge_rec->undo_rec = trx_purge_fetch_next_rec(
-			&purge_rec->roll_ptr, &n_pages_handled, heap);
+			&purge_rec->roll_ptr, &n_pages_handled,
+			purge_sys.heap);
 
 		if (purge_rec->undo_rec == NULL) {
 			break;

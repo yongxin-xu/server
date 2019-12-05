@@ -466,7 +466,7 @@ row_vers_build_clust_v_col(
 				       &record,
 				       &vcol_storage);
 
-	ut_ad(maria_table != NULL);
+	ut_ad(maria_table);
 
 	for (ulint i = 0; i < dict_index_get_n_fields(index); i++) {
 		const dict_field_t* ind_field = dict_index_get_nth_field(

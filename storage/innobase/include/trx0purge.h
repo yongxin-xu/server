@@ -213,7 +213,7 @@ public:
 	} truncate;
 
 	/** Heap for reading the undo log records */
-	mem_heap_t*	m_heap;
+	mem_heap_t*	heap;
   /**
     Constructor.
 
@@ -221,7 +221,7 @@ public:
     uninitialised. Real initialisation happens in create().
   */
 
-  purge_sys_t(): m_enabled(false), m_heap(NULL) {}
+  purge_sys_t(): m_enabled(false), heap(nullptr) {}
 
   /** Create the instance */
   void create();

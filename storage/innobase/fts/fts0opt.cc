@@ -45,8 +45,8 @@ static tpool::timer* timer;
 static tpool::task_group task_group(1);
 static tpool::task task(fts_optimize_callback,0, &task_group);
 
-/** FTS optimize thread */
-THD* fts_opt_thd;
+/** FTS optimize thread, for MDL acquisition */
+static THD *fts_opt_thd;
 
 /** The FTS vector to store fts_slot_t */
 static ib_vector_t*  fts_slots;
@@ -2789,22 +2789,20 @@ static bool fts_is_sync_needed()
 }
 
 /** Sync fts cache of a table
-@param[in,out]	table		table to be synced
-@param[in]	fts_opt_thread	fts optimize thread
-@param[in]	process_message	processing messages from fts_optimize_wq */
-static void fts_optimize_sync_table(dict_table_t* table,
-                                    THD* fts_opt_thread,
-                                    bool process_message=false)
+@param[in,out]  table           table to be synced
+@param[in]      process_message processing messages from fts_optimize_wq */
+static void fts_optimize_sync_table(dict_table_t *table,
+                                    bool process_message= false)
 {
-  MDL_ticket* mdl_ticket = NULL;
-  dict_table_t*	sync_table = dict_acquire_mdl_shared<true>(
-                 table, fts_opt_thread, &mdl_ticket);
+  MDL_ticket* mdl_ticket= nullptr;
+  dict_table_t *sync_table= dict_acquire_mdl_shared<true>(table, fts_opt_thd,
+                                                          &mdl_ticket);
 
   if (!sync_table)
     return;
 
-  if (sync_table->fts && sync_table->fts->cache
-       && fil_table_accessible(sync_table))
+  if (sync_table->fts && sync_table->fts->cache &&
+      fil_table_accessible(sync_table))
   {
     fts_sync_table(sync_table, false);
     if (process_message)
@@ -2818,8 +2816,7 @@ static void fts_optimize_sync_table(dict_table_t* table,
   DBUG_EXECUTE_IF("ib_optimize_wq_hang", os_thread_sleep(6000000););
 
   if (mdl_ticket)
-    dict_table_close(sync_table, false, false,
-                     fts_opt_thread, mdl_ticket);
+    dict_table_close(sync_table, false, false, fts_opt_thd, mdl_ticket);
 }
 
 /**********************************************************************//**
@@ -2911,7 +2908,7 @@ static void fts_optimize_callback(void *)
 
 				fts_optimize_sync_table(
 					static_cast<dict_table_t*>(msg->ptr),
-					fts_opt_thd, true);
+					true);
 				break;
 
 			default:
@@ -2931,8 +2928,7 @@ static void fts_optimize_callback(void *)
 				ib_vector_get(fts_slots, i));
 
 			if (slot->table) {
-				fts_optimize_sync_table(
-					slot->table, fts_opt_thd);
+				fts_optimize_sync_table(slot->table);
 			}
 		}
 	}
@@ -2970,8 +2966,7 @@ fts_optimize_init(void)
 	heap_alloc = ib_heap_allocator_create(heap);
 	fts_slots = ib_vector_create(heap_alloc, sizeof(fts_slot_t), 4);
 
-	fts_opt_thd = innobase_create_background_thd(
-			"InnoDB fts optimize thread");
+	fts_opt_thd = innobase_create_background_thd("InnoDB FTS optimizer");
 	/* Add fts tables to fts_slots which could be skipped
 	during dict_load_table_one() because fts_optimize_thread
 	wasn't even started. */

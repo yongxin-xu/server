@@ -196,28 +196,29 @@ public:
 		def_trx_id = limit;
 	}
 
-   /** Start processing an undo log record. */
-   void start()
-   {
-     ut_ad(in_progress);
-     DBUG_ASSERT(common.type == QUE_NODE_PURGE);
+  /** Start processing an undo log record. */
+  void start()
+  {
+    ut_ad(in_progress);
+    DBUG_ASSERT(common.type == QUE_NODE_PURGE);
 
-     row = NULL;
-     ref = NULL;
-     index = NULL;
-     update = NULL;
-     found_clust = FALSE;
-     rec_type = ULINT_UNDEFINED;
-     cmpl_info = ULINT_UNDEFINED;
-     if (!purge_thd)
-       purge_thd = current_thd;
-   }
+    row= nullptr;
+    ref= nullptr;
+    index= nullptr;
+    update= nullptr;
+    found_clust= FALSE;
+    rec_type= ULINT_UNDEFINED;
+    cmpl_info= ULINT_UNDEFINED;
+    if (!purge_thd)
+      purge_thd= current_thd;
+  }
+
 
   /** Close the existing table and release the MDL for it. */
   void close_table()
   {
     last_table_id= 0;
-    if (table == NULL)
+    if (!table)
     {
       ut_ad(!mdl_ticket);
       return;
@@ -225,9 +226,10 @@ public:
 
     innobase_reset_background_thd(purge_thd);
     dict_table_close(table, false, false, purge_thd, mdl_ticket);
-    table= NULL;
-    mdl_ticket= NULL;
+    table= nullptr;
+    mdl_ticket= nullptr;
   }
+
 
   /** Retail mdl for the table id.
   @param[in]	table_id	table id to be processed
@@ -237,7 +239,7 @@ public:
     ut_ad(table_id);
     if (last_table_id == table_id && mdl_hold_recs < 100)
     {
-      ut_ad(table != NULL);
+      ut_ad(table);
       mdl_hold_recs++;
       return true;
     }
@@ -247,6 +249,7 @@ public:
     return false;
   }
 
+
   /** Reset the state at end
   @return the query graph parent */
   que_node_t* end()
@@ -254,8 +257,8 @@ public:
     DBUG_ASSERT(common.type == QUE_NODE_PURGE);
     close_table();
     undo_recs.clear();
-    ut_d(in_progress = false);
-    purge_thd = NULL;
+    ut_d(in_progress= false);
+    purge_thd= nullptr;
     mem_heap_empty(heap);
     return common.parent;
   }

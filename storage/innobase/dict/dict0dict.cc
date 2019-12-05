@@ -207,17 +207,6 @@ dict_remove_db_name(
 	return(s + 1);
 }
 
-/** Get the database name length in a table name.
-@param[in] name table name in the form of dbname '/' tablename
-@return database name length */
-ulint dict_get_db_name_len(const char* name)
-{
-  if (const char* s= strchr(name, '/'))
-    return ulint(s - name);
-
-  return 0;
-}
-
 /** Open a persistent table.
 @param[in]	table_id	persistent table identifier
 @param[in]	ignore_err	errors to ignore
@@ -733,30 +722,30 @@ dict_index_get_nth_field_pos(
 }
 
 /** Parse the table file name into table name and database name.
-@param[in]      tbl_name        InnoDB table name
+@param[in]      name            InnoDB table name
 @param[in,out]  mysql_db_name   database name buffer
 @param[in,out]  mysql_tbl_name  table name buffer
 @param[out]     db_name_len     database name length
 @param[out]     tbl_name_len    table name length
 @return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const char *tbl_name,
+bool dict_parse_tbl_name(const table_name_t& name,
                          char (&mysql_db_name)[NAME_LEN + 1],
                          char (&mysql_tbl_name)[NAME_LEN + 1],
                          size_t *db_name_len, size_t *tbl_name_len)
 {
-  const size_t db_len= dict_get_db_name_len(tbl_name);
+  const size_t db_len= name.dblen();
   char db_buf[MAX_DATABASE_NAME_LEN + 1];
   char tbl_buf[MAX_TABLE_NAME_LEN + 1];
 
   ut_ad(db_len > 0);
   ut_ad(db_len <= MAX_DATABASE_NAME_LEN);
 
-  memcpy(db_buf, tbl_name, db_len);
+  memcpy(db_buf, name.m_name, db_len);
   db_buf[db_len]= 0;
 
-  size_t tbl_len= strlen(tbl_name) - db_len - 1;
-  memcpy(tbl_buf, tbl_name + db_len + 1, tbl_len);
-  tbl_buf[tbl_len]= 0;
+  size_t tbl_len= strlen(name.m_name + db_len);
+  memcpy(tbl_buf, name.m_name + db_len + 1, tbl_len);
+  tbl_len--;
 
   *db_name_len= db_len;
   *tbl_name_len= tbl_len;

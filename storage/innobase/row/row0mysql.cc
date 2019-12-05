@@ -3506,9 +3506,9 @@ row_drop_table_for_mysql(
 defer:
 		/* Rename #sql2 to #sql-ib if table has open ref count
 		while dropping the table. This scenario can happen
-		when purge thread is waiting for dict_sys->mutex to
-		close the table. But drop table table acquires
-		dict_sys->mutex. */
+		when purge thread is waiting for dict_sys.mutex so
+		that it could close the table. But drop table acquires
+		dict_sys.mutex. */
 		if (!is_temp_name
 		    || strstr(table->name.m_name, "/#sql2")) {
 			heap = mem_heap_create(FN_REFLEN);

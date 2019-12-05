@@ -41,11 +41,19 @@ extern bool innodb_index_stats_not_found;
 /** the first table or index ID for other than hard-coded system tables */
 constexpr uint8_t DICT_HDR_FIRST_ID= 10;
 
+
 /** Get the database name length in a table name.
-@param[in] name table name in the form of dbname '/' tablename
+@param name   filename-safe encoded table name "dbname/tablename"
 @return database name length */
-ulint dict_get_db_name_len(const char* name)
-      MY_ATTRIBUTE((nonnull, warn_unused_result));
+inline size_t dict_get_db_name_len(const char *name)
+{
+  /* table_name_t::dblen() would assert that '/' is contained */
+  if (const char* s= strchr(name, '/'))
+    return size_t(s - name);
+
+  return 0;
+}
+
 
 /*********************************************************************//**
 Open a table from its database and table name, this is currently used by
@@ -119,13 +127,13 @@ enum dict_table_op_t {
 
 
 /** Parse the table file name into table name and database name.
-@param[in]      tbl_name        InnoDB table name
+@param[in]      name            InnoDB table name
 @param[in,out]  mysql_db_name   database name buffer
 @param[in,out]  mysql_tbl_name  table name buffer
 @param[out]     db_name_len     database name length
 @param[out]     tbl_name_len    table name length
 @return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const char *tbl_name,
+bool dict_parse_tbl_name(const table_name_t &name,
                          char (&mysql_db_name)[NAME_LEN + 1],
                          char (&mysql_tbl_name)[NAME_LEN + 1],
                          size_t *db_name_len, size_t *tbl_name_len)
