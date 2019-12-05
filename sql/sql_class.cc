@@ -4726,17 +4726,17 @@ extern "C" void thd_create_random_password(MYSQL_THD thd,
   To make sure no table stays open for long, this helper allows the thread to
   have only one table open at any given time.
 */
-TABLE *open_purge_table(THD *thd, const char *db,
-                        const char *tb)
+TABLE *open_purge_table(THD *thd, const char *db, size_t dblen,
+                        const char *tb, size_t tblen)
 {
   DBUG_ENTER("open_purge_table");
   DBUG_ASSERT(thd->open_tables == NULL);
   DBUG_ASSERT(thd->locked_tables_mode < LTM_PRELOCKED);
 
-  Open_table_context ot_ctx(thd, MYSQL_OPEN_HAS_MDL_LOCK);
+  Open_table_context ot_ctx(thd, 0);
   TABLE_LIST *tl= (TABLE_LIST*)thd->alloc(sizeof(TABLE_LIST));
-  LEX_CSTRING db_name= {db, strlen(db) };
-  LEX_CSTRING table_name= { tb, strlen(tb) };
+  LEX_CSTRING db_name= {db, dblen };
+  LEX_CSTRING table_name= { tb, tblen };
 
   tl->init_one_table(&db_name, &table_name, 0, TL_READ);
   tl->i_s_requested_object= OPEN_TABLE_ONLY;
@@ -4767,13 +4767,12 @@ TABLE *get_purge_table(THD *thd)
   But only when virtual columns are involved, otherwise InnoDB
   does not need an open TABLE.
 */
-TABLE *find_fk_open_table(THD *thd, const char *db,
-                          const char *table)
+TABLE *find_fk_open_table(THD *thd, const char *db, size_t db_len,
+                       const char *table, size_t table_len)
 {
   for (TABLE *t= thd->open_tables; t; t= t->next)
   {
-    if (t->s->db.length == strlen(db) &&
-        t->s->table_name.length == strlen(table) &&
+    if (t->s->db.length == db_len && t->s->table_name.length == table_len &&
         !strcmp(t->s->db.str, db) && !strcmp(t->s->table_name.str, table) &&
         t->pos_in_table_list->prelocking_placeholder == TABLE_LIST::PRELOCK_FK)
       return t;

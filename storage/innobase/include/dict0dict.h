@@ -119,13 +119,17 @@ enum dict_table_op_t {
 
 
 /** Parse the table file name into table name and database name.
-@param[in]	tbl_name	InnoDB table name
-@param[in,out]	mysql_db_name	database name buffer
-@param[in,out]	mysql_tbl_name	table name buffer
+@param[in]      tbl_name        InnoDB table name
+@param[in,out]  mysql_db_name   database name buffer
+@param[in,out]  mysql_tbl_name  table name buffer
+@param[out]     db_name_len     database name length
+@param[out]     tbl_name_len    table name length
 @return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const char* tbl_name,
+bool dict_parse_tbl_name(const char *tbl_name,
                          char (&mysql_db_name)[NAME_LEN + 1],
-                         char (&mysql_tbl_name)[NAME_LEN + 1]);
+                         char (&mysql_tbl_name)[NAME_LEN + 1],
+                         size_t *db_name_len, size_t *tbl_name_len)
+  MY_ATTRIBUTE((nonnull));
 
 /** Acquire MDL shared for the table name.
 @tparam trylock whether to use non-blocking operation

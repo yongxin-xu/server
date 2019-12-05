@@ -122,14 +122,14 @@ extern "C" void thd_mark_transaction_to_rollback(MYSQL_THD thd, bool all);
 unsigned long long thd_get_query_id(const MYSQL_THD thd);
 void thd_clear_error(MYSQL_THD thd);
 
-TABLE *find_fk_open_table(THD *thd, const char *db,
-			  const char *table);
+TABLE *find_fk_open_table(THD *thd, const char *db, size_t db_len,
+			  const char *table, size_t table_len);
 MYSQL_THD create_background_thd();
 void destroy_background_thd(MYSQL_THD thd);
 void reset_thd(MYSQL_THD thd);
-TABLE *open_purge_table(THD *thd, const char *db,
-			const char *tb);
 TABLE *get_purge_table(THD *thd);
+TABLE *open_purge_table(THD *thd, const char *db, size_t dblen,
+			const char *tb, size_t tblen);
 void close_thread_tables(THD* thd);
 
 #ifdef MYSQL_DYNAMIC_PLUGIN
@@ -20654,16 +20654,20 @@ static TABLE* innodb_find_table_for_vc(THD* thd, dict_table_t* table)
 
 	char	db_buf[NAME_LEN + 1];
 	char	tbl_buf[NAME_LEN + 1];
+	ulint	db_buf_len, tbl_buf_len;
 
-	if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf)) {
+        if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf,
+                                 &db_buf_len, &tbl_buf_len)) {
 		return NULL;
 	}
 
 	if (bg_thread) {
-		return open_purge_table(thd, db_buf, tbl_buf);
+		return open_purge_table(thd, db_buf, db_buf_len,
+					tbl_buf, tbl_buf_len);
 	}
 
-	mysql_table = find_fk_open_table(thd, db_buf, tbl_buf);
+	mysql_table = find_fk_open_table(thd, db_buf, db_buf_len,
+					 tbl_buf, tbl_buf_len);
 	table->vc_templ->mysql_table = mysql_table;
 	table->vc_templ->mysql_table_query_id = thd_get_query_id(thd);
 	return mysql_table;

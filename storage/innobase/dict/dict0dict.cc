@@ -733,13 +733,16 @@ dict_index_get_nth_field_pos(
 }
 
 /** Parse the table file name into table name and database name.
-@param[in]	tbl_name	InnoDB table name
-@param[in,out]	mysql_db_name	database name buffer
-@param[in,out]	mysql_tbl_name	table name buffer
+@param[in]      tbl_name        InnoDB table name
+@param[in,out]  mysql_db_name   database name buffer
+@param[in,out]  mysql_tbl_name  table name buffer
+@param[out]     db_name_len     database name length
+@param[out]     tbl_name_len    table name length
 @return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const char* tbl_name,
+bool dict_parse_tbl_name(const char *tbl_name,
                          char (&mysql_db_name)[NAME_LEN + 1],
-                         char (&mysql_tbl_name)[NAME_LEN + 1])
+                         char (&mysql_tbl_name)[NAME_LEN + 1],
+                         size_t *db_name_len, size_t *tbl_name_len)
 {
   const size_t db_len= dict_get_db_name_len(tbl_name);
   char db_buf[MAX_DATABASE_NAME_LEN + 1];
@@ -754,6 +757,9 @@ bool dict_parse_tbl_name(const char* tbl_name,
   size_t tbl_len= strlen(tbl_name) - db_len - 1;
   memcpy(tbl_buf, tbl_name + db_len + 1, tbl_len);
   tbl_buf[tbl_len]= 0;
+
+  *db_name_len= db_len;
+  *tbl_name_len= tbl_len;
 
   filename_to_tablename(db_buf, mysql_db_name,
                         MAX_DATABASE_NAME_LEN + 1, true);
@@ -790,7 +796,7 @@ dict_acquire_mdl_shared(dict_table_t *table,
   if (!table || !mdl)
     return table;
 
-  ulint db_len= dict_get_db_name_len(table->name.m_name);
+  size_t db_len= dict_get_db_name_len(table->name.m_name);
 
   if (db_len == 0)
     return table; /* InnoDB system tables are not covered by MDL */
@@ -802,9 +808,11 @@ dict_acquire_mdl_shared(dict_table_t *table,
   table_id_t table_id= table->id;
   char db_buf[NAME_LEN + 1], db_buf1[NAME_LEN + 1];
   char tbl_buf[NAME_LEN + 1], tbl_buf1[NAME_LEN + 1];
+  size_t tbl_len;
   bool unaccessible= false;
 
-  if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf))
+  if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf,
+			   &db_len, &tbl_len))
      /* Intermediate table starts with #sql */
     return table;
 
@@ -860,11 +868,16 @@ is_unaccessible:
   if (!fil_table_accessible(table))
     goto is_unaccessible;
 
-  dict_parse_tbl_name(table->name.m_name, db_buf1, tbl_buf1);
+  size_t db1_len, tbl1_len;
+
+  dict_parse_tbl_name(table->name.m_name, db_buf1, tbl_buf1,
+                      &db1_len, &tbl1_len);
 
   if (*mdl)
   {
-    if (!strcmp(db_buf, db_buf1) && !strcmp(tbl_buf, tbl_buf1))
+    if (db_len == db1_len && tbl_len == tbl1_len &&
+        !memcmp(db_buf, db_buf1, db_len) &&
+        !memcmp(tbl_buf, tbl_buf1, tbl_len))
       return table;
 
     /* The table was renamed. Release MDL for the old name and
@@ -873,8 +886,11 @@ is_unaccessible:
     *mdl= nullptr;
   }
 
-  strcpy(tbl_buf, tbl_buf1);
-  strcpy(db_buf, db_buf1);
+  db_len= db1_len;
+  tbl_len= tbl1_len;
+
+  memcpy(tbl_buf, tbl_buf1, tbl_len + 1);
+  memcpy(db_buf, db_buf1, db_len + 1);
   goto retry;
 }
 
