@@ -62,7 +62,7 @@ General philosophy of InnoDB redo-logs:
 through mtr, which in mtr_commit() writes log records
 to the InnoDB redo log.
 
-2) Normally these changes are performed using a mlog_write_ulint()
+2) Normally these changes are performed using a mlog_write()
 or similar function.
 
 3) In some page level operations only a code number of a
@@ -822,14 +822,14 @@ log_buffer_switch()
 
 	if (log_sys.first_in_use) {
 		log_sys.first_in_use = false;
-		ut_ad(log_sys.buf == ut_align(log_sys.buf,
-					       OS_FILE_LOG_BLOCK_SIZE));
+		ut_ad(log_sys.buf == ut_align_down(log_sys.buf,
+						   OS_FILE_LOG_BLOCK_SIZE));
 		log_sys.buf += srv_log_buffer_size;
 	} else {
 		log_sys.first_in_use = true;
 		log_sys.buf -= srv_log_buffer_size;
-		ut_ad(log_sys.buf == ut_align(log_sys.buf,
-					       OS_FILE_LOG_BLOCK_SIZE));
+		ut_ad(log_sys.buf == ut_align_down(log_sys.buf,
+						   OS_FILE_LOG_BLOCK_SIZE));
 	}
 
 	/* Copy the last block to new buf */

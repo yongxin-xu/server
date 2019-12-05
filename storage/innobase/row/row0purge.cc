@@ -488,26 +488,21 @@ row_purge_remove_sec_if_poss_leaf(
 				goto func_exit_no_pcur;
 			}
 
-			if (dict_index_is_spatial(index)) {
-				const page_t*   page;
-				const trx_t*	trx = NULL;
+			if (index->is_spatial()) {
+				const buf_block_t* block = btr_cur_get_block(
+					btr_cur);
 
-				if (btr_cur->rtr_info != NULL
-				    && btr_cur->rtr_info->thr != NULL) {
-					trx = thr_get_trx(
-						btr_cur->rtr_info->thr);
-				}
-
-				page = btr_cur_get_page(btr_cur);
-
-				if (!lock_test_prdt_page_lock(
-					    trx,
-					    page_get_space_id(page),
-					    page_get_page_no(page))
-				    && page_get_n_recs(page) < 2
-				    && btr_cur_get_block(btr_cur)
-				    ->page.id.page_no() !=
-				    dict_index_get_page(index)) {
+				if (block->page.id.page_no()
+				    != index->page
+				    && page_get_n_recs(block->frame) < 2
+				    && !lock_test_prdt_page_lock(
+					    btr_cur->rtr_info
+					    && btr_cur->rtr_info->thr
+					    ? thr_get_trx(
+						    btr_cur->rtr_info->thr)
+					    : NULL,
+					    block->page.id.space(),
+					    block->page.id.page_no())) {
 					/* this is the last record on page,
 					and it has a "page" lock on it,
 					which mean search is still depending
@@ -515,8 +510,7 @@ row_purge_remove_sec_if_poss_leaf(
 					DBUG_LOG("purge",
 						 "skip purging last"
 						 " record on page "
-						 << btr_cur_get_block(btr_cur)
-						 ->page.id);
+						 << block->page.id);
 
 					btr_pcur_close(&pcur);
 					mtr.commit();
@@ -711,8 +705,15 @@ static void row_purge_reset_trx_id(purge_node_t* node, mtr_t* mtr)
 				byte*	ptr = rec_get_nth_field(
 					rec, offsets, trx_id_pos, &len);
 				ut_ad(len == DATA_TRX_ID_LEN);
-				mlog_write_string(ptr, reset_trx_id,
-						  sizeof reset_trx_id, mtr);
+				buf_block_t* block = btr_pcur_get_block(
+					&node->pcur);
+				uint16_t offs = page_offset(ptr);
+				mtr->memset(block, offs, DATA_TRX_ID_LEN, 0);
+				offs += DATA_TRX_ID_LEN;
+				mtr->write<1,mtr_t::OPT>(*block, block->frame
+							 + offs, 0x80U);
+				mtr->memset(block, offs + 1,
+					    DATA_ROLL_PTR_LEN - 1, 0);
 			}
 		}
 	}
@@ -784,12 +785,11 @@ skip_secondaries:
 		if (dfield_is_ext(&ufield->new_val)) {
 			trx_rseg_t*	rseg;
 			buf_block_t*	block;
-			ulint		internal_offset;
 			byte*		data_field;
-			ibool		is_insert;
+			bool		is_insert;
 			ulint		rseg_id;
-			ulint		page_no;
-			ulint		offset;
+			uint32_t	page_no;
+			uint16_t	offset;
 
 			/* We use the fact that new_val points to
 			undo_rec and get thus the offset of
@@ -797,7 +797,7 @@ skip_secondaries:
 			can calculate from node->roll_ptr the file
 			address of the new_val data */
 
-			internal_offset = ulint(
+			const uint16_t internal_offset = uint16_t(
 				static_cast<const byte*>
 				(dfield_get_data(&ufield->new_val))
 				- undo_rec);
@@ -849,7 +849,7 @@ skip_secondaries:
 				index,
 				data_field + dfield_get_len(&ufield->new_val)
 				- BTR_EXTERN_FIELD_REF_SIZE,
-				NULL, NULL, NULL, 0, false, &mtr);
+				NULL, NULL, block, 0, false, &mtr);
 			mtr.commit();
 		}
 	}

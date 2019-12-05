@@ -1903,36 +1903,25 @@ clear_page_max_trx_id:
 /** Validate the space flags and update tablespace header page.
 @param block block read from file, not from the buffer pool.
 @retval DB_SUCCESS or error code */
-inline
-dberr_t
-PageConverter::update_header(
-	buf_block_t*	block) UNIV_NOTHROW
+inline dberr_t PageConverter::update_header(buf_block_t* block) UNIV_NOTHROW
 {
-	/* Check for valid header */
-	switch (fsp_header_get_space_id(get_frame(block))) {
-	case 0:
-		return(DB_CORRUPTION);
-	case ULINT_UNDEFINED:
-		ib::warn() << "Space id check in the header failed: ignored";
-	}
+  byte *frame= get_frame(block);
+  if (memcmp_aligned<4>(FIL_PAGE_SPACE_ID + frame,
+                        FSP_HEADER_OFFSET + FSP_SPACE_ID + frame, 4))
+    ib::warn() << "Space id check in the header failed: ignored";
+  else if (!mach_read_from_4(FIL_PAGE_SPACE_ID + frame))
+    return DB_CORRUPTION;
 
-	memset(get_frame(block) + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION,0,8);
+  memset(frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, 0, 8);
 
-	/* Write back the adjusted flags. */
-	mach_write_to_4(FSP_HEADER_OFFSET + FSP_SPACE_FLAGS
-			+ get_frame(block), m_space_flags);
+  /* Write space_id to the tablespace header, page 0. */
+  mach_write_to_4(FIL_PAGE_SPACE_ID + frame, get_space_id());
+  memcpy_aligned<4>(FSP_HEADER_OFFSET + FSP_SPACE_ID + frame,
+                    FIL_PAGE_SPACE_ID + frame, 4);
+  /* Write back the adjusted flags. */
+  mach_write_to_4(FSP_HEADER_OFFSET + FSP_SPACE_FLAGS + frame, m_space_flags);
 
-	/* Write space_id to the tablespace header, page 0. */
-	mach_write_to_4(
-		get_frame(block) + FSP_HEADER_OFFSET + FSP_SPACE_ID,
-		get_space_id());
-
-	/* This is on every page in the tablespace. */
-	mach_write_to_4(
-		get_frame(block) + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID,
-		get_space_id());
-
-	return(DB_SUCCESS);
+  return DB_SUCCESS;
 }
 
 /** Update the page, set the space id, max trx id and index id.
@@ -3667,11 +3656,10 @@ fil_tablespace_iterate(
 
 	/* Allocate a page to read in the tablespace header, so that we
 	can determine the page size and zip_size (if it is compressed).
-	We allocate an extra page in case it is a compressed table. One
-	page is to ensure alignement. */
+	We allocate an extra page in case it is a compressed table. */
 
-	void*	page_ptr = ut_malloc_nokey(3U << srv_page_size_shift);
-	byte*	page = static_cast<byte*>(ut_align(page_ptr, srv_page_size));
+	byte*	page = static_cast<byte*>(aligned_malloc(2 * srv_page_size,
+							 srv_page_size));
 
 	buf_block_t* block = reinterpret_cast<buf_block_t*>
 		(ut_zalloc_nokey(sizeof *block));
@@ -3723,20 +3711,16 @@ fil_tablespace_iterate(
 		iter.n_io_buffers = n_io_buffers;
 
 		/* Add an extra page for compressed page scratch area. */
-		void*	io_buffer = ut_malloc_nokey(
-			(2 + iter.n_io_buffers) << srv_page_size_shift);
-
 		iter.io_buffer = static_cast<byte*>(
-			ut_align(io_buffer, srv_page_size));
+			aligned_malloc((1 + iter.n_io_buffers)
+				       << srv_page_size_shift, srv_page_size));
 
-		void* crypt_io_buffer = NULL;
-		if (iter.crypt_data) {
-			crypt_io_buffer = ut_malloc_nokey(
-				(2 + iter.n_io_buffers)
-				<< srv_page_size_shift);
-			iter.crypt_io_buffer = static_cast<byte*>(
-				ut_align(crypt_io_buffer, srv_page_size));
-		}
+		iter.crypt_io_buffer = iter.crypt_data
+			? static_cast<byte*>(
+				aligned_malloc((1 + iter.n_io_buffers)
+					       << srv_page_size_shift,
+					       srv_page_size))
+			: NULL;
 
 		if (block->page.zip.ssize) {
 			ut_ad(iter.n_io_buffers == 1);
@@ -3750,8 +3734,8 @@ fil_tablespace_iterate(
 			fil_space_destroy_crypt_data(&iter.crypt_data);
 		}
 
-		ut_free(crypt_io_buffer);
-		ut_free(io_buffer);
+		aligned_free(iter.crypt_io_buffer);
+		aligned_free(iter.io_buffer);
 	}
 
 	if (err == DB_SUCCESS) {
@@ -3767,7 +3751,7 @@ fil_tablespace_iterate(
 
 	os_file_close(file);
 
-	ut_free(page_ptr);
+	aligned_free(page);
 	ut_free(filepath);
 	ut_free(block);
 

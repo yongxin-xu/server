@@ -1837,12 +1837,10 @@ dberr_t
 fil_write_flushed_lsn(
 	lsn_t	lsn)
 {
-	byte*	buf1;
 	byte*	buf;
 	dberr_t	err = DB_TABLESPACE_NOT_FOUND;
 
-	buf1 = static_cast<byte*>(ut_malloc_nokey(2U << srv_page_size_shift));
-	buf = static_cast<byte*>(ut_align(buf1, srv_page_size));
+	buf = static_cast<byte*>(aligned_malloc(srv_page_size, srv_page_size));
 
 	const page_id_t	page_id(TRX_SYS_SPACE, 0);
 
@@ -1862,7 +1860,7 @@ fil_write_flushed_lsn(
 		fil_flush_file_spaces(FIL_TYPE_TABLESPACE);
 	}
 
-	ut_free(buf1);
+	aligned_free(buf);
 	return(err);
 }
 
@@ -2919,7 +2917,6 @@ fil_ibd_create(
 	dberr_t*	err)
 {
 	pfs_os_file_t	file;
-	byte*		buf2;
 	byte*		page;
 	bool		success;
 	bool		has_data_dir = FSP_FLAGS_HAS_DATA_DIR(flags) != 0;
@@ -2998,9 +2995,9 @@ err_exit:
 	with zeros from the call of os_file_set_size(), until a buffer pool
 	flush would write to it. */
 
-	buf2 = static_cast<byte*>(ut_malloc_nokey(3U << srv_page_size_shift));
 	/* Align the memory for file i/o if we might have O_DIRECT set */
-	page = static_cast<byte*>(ut_align(buf2, srv_page_size));
+	page = static_cast<byte*>(aligned_malloc(2 * srv_page_size,
+						 srv_page_size));
 
 	memset(page, '\0', srv_page_size);
 
@@ -3048,7 +3045,7 @@ err_exit:
 			IORequestWrite, path, file, page, 0, srv_page_size);
 	}
 
-	ut_free(buf2);
+	aligned_free(page);
 
 	if (*err != DB_SUCCESS) {
 		ib::error()
@@ -3899,8 +3896,8 @@ void fsp_flags_try_adjust(fil_space_t* space, ulint flags)
 				<< " to " << ib::hex(flags);
 		}
 		mtr.set_named_space(space);
-		mlog_write_ulint(FSP_HEADER_OFFSET + FSP_SPACE_FLAGS
-				 + b->frame, flags, MLOG_4BYTES, &mtr);
+		mtr.write<4>(*b, FSP_HEADER_OFFSET + FSP_SPACE_FLAGS
+			     + b->frame, flags);
 	}
 func_exit:
 	mtr.commit();

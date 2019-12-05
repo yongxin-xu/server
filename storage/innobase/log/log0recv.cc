@@ -254,10 +254,8 @@ public:
 		lsn_t lsn;
 		/** Whether btr_page_create() avoided a read of the page.
 
-		At the end of the last recovery batch, ibuf_merge()
-		will invoke change buffer merge for pages that reside
-		in the buffer pool. (In the last batch, loading pages
-		would trigger change buffer merge.) */
+		At the end of the last recovery batch, mark_ibuf_exist()
+		will mark pages for which this flag is set. */
 		bool created;
 	};
 
@@ -307,14 +305,9 @@ public:
 		}
 	}
 
-	/** On the last recovery batch, mark whether the page contains
-	change buffered changes for the list of pages that were initialized
+	/** On the last recovery batch, mark whether there exist
+	buffered changes for the pages that were initialized
 	by buf_page_create() and still reside in the buffer pool.
-
-	Note: When MDEV-14481 implements redo log apply in the
-	background, we will have to ensure that buf_page_get_gen()
-	will not deliver stale pages to users (pages on which the
-	change buffer was not merged yet).
 	@param[in,out]	mtr	dummy mini-transaction */
 	void mark_ibuf_exist(mtr_t& mtr)
 	{
@@ -1462,10 +1455,8 @@ parse_log:
 		}
 #endif /* UNIV_DEBUG */
 		ptr = mlog_parse_nbytes(type, ptr, end_ptr, page, page_zip);
-		if (ptr != NULL && page != NULL
-		    && page_no == 0 && type == MLOG_4BYTES) {
-			ulint	offs = mach_read_from_2(old_ptr);
-			switch (offs) {
+		if (ptr && page && !page_no && type == MLOG_4BYTES) {
+			switch (ulint offs = mach_read_from_2(old_ptr)) {
 				fil_space_t*	space;
 				ulint		val;
 			default:
@@ -1621,7 +1612,7 @@ parse_log:
 		break;
 	case MLOG_UNDO_HDR_CREATE:
 		ut_ad(!page || page_type == FIL_PAGE_UNDO_LOG);
-		ptr = trx_undo_parse_page_header(ptr, end_ptr, page, mtr);
+		ptr = trx_undo_parse_page_header(ptr, end_ptr, block, mtr);
 		break;
 	case MLOG_REC_MIN_MARK: case MLOG_COMP_REC_MIN_MARK:
 		ut_ad(!page || fil_page_type_is_index(page_type));
@@ -1632,7 +1623,7 @@ parse_log:
 		ut_a(type == MLOG_COMP_REC_MIN_MARK || !page_zip);
 		ptr = btr_parse_set_min_rec_mark(
 			ptr, end_ptr, type == MLOG_COMP_REC_MIN_MARK,
-			page, mtr);
+			block, mtr);
 		break;
 	case MLOG_REC_DELETE: case MLOG_COMP_REC_DELETE:
 		ut_ad(!page || fil_page_type_is_index(page_type));
@@ -1662,6 +1653,25 @@ parse_log:
 		this record yet. */
 		break;
 	case MLOG_WRITE_STRING:
+		if (page_no || mach_read_from_2(ptr + 2)
+		    != 11 + MY_AES_BLOCK_SIZE) {
+			/* Not writing crypt_info */
+		} else if (fil_space_t* space
+			   = fil_space_acquire_silent(space_id)) {
+			if (mach_read_from_2(ptr)
+			    == FSP_HEADER_OFFSET + XDES_ARR_OFFSET + MAGIC_SZ
+			    + space->physical_size() * XDES_SIZE
+			    / FSP_EXTENT_SIZE
+			    && (ptr[4] == CRYPT_SCHEME_UNENCRYPTED
+				|| ptr[4] == CRYPT_SCHEME_1)
+			    && ptr[5] == MY_AES_BLOCK_SIZE
+			    && ptr[6 + MY_AES_BLOCK_SIZE + 4 + 4]
+			    <= FIL_ENCRYPTION_OFF) {
+				/* from fil_space_crypt_t::write_page0() */
+				fil_crypt_parse(space, ptr + 4);
+			}
+			space->release();
+		}
 		ptr = mlog_parse_string(ptr, end_ptr, page, page_zip);
 		break;
 	case MLOG_ZIP_WRITE_NODE_PTR:
@@ -2083,8 +2093,7 @@ static void recv_read_in_area(page_id_t page_id)
 }
 
 /** Apply recv_sys.pages to persistent data pages.
-@param[in]	last_batch	whether the change buffer merge will be
-				performed as part of the operation */
+@param[in]	last_batch	whether redo log writes are possible */
 void recv_apply_hashed_log_recs(bool last_batch)
 {
 	ut_ad(srv_operation == SRV_OPERATION_NORMAL
@@ -3182,10 +3191,6 @@ recv_group_scan_log_recs(
 	do {
 		if (last_phase && store_to_hash == STORE_NO) {
 			store_to_hash = STORE_IF_EXISTS;
-			/* We must not allow change buffer
-			merge here, because it would generate
-			redo log records before we have
-			finished the redo log scan. */
 			recv_apply_hashed_log_recs(false);
 		}
 
@@ -3397,6 +3402,15 @@ recv_recovery_from_checkpoint_start(lsn_t flush_lsn)
 	ut_ad(srv_operation == SRV_OPERATION_NORMAL
 	      || srv_operation == SRV_OPERATION_RESTORE
 	      || srv_operation == SRV_OPERATION_RESTORE_EXPORT);
+#ifdef UNIV_DEBUG
+	for (ulint i= 0; i < srv_buf_pool_instances; i++) {
+		buf_pool_t* buf_pool = buf_pool_from_array(i);
+		buf_flush_list_mutex_enter(buf_pool);
+		ut_ad(UT_LIST_GET_LEN(buf_pool->LRU) == 0);
+		ut_ad(UT_LIST_GET_LEN(buf_pool->unzip_LRU) == 0);
+		buf_flush_list_mutex_exit(buf_pool);
+	}
+#endif
 
 	/* Initialize red-black tree for fast insertions into the
 	flush_list during recovery process. */

@@ -2755,7 +2755,7 @@ err_exit:
 				insert fails, then this disown will be undone
 				when the operation is rolled back. */
 				btr_cur_disown_inherited_fields(
-					btr_cur_get_page_zip(btr_cur),
+					btr_cur_get_block(btr_cur),
 					rec, index, offsets, node->update,
 					mtr);
 			}
@@ -3124,8 +3124,7 @@ row_upd_clust_step(
 
 		ut_ad(!dict_index_is_online_ddl(index));
 
-		dict_drop_index_tree(
-			btr_pcur_get_rec(pcur), pcur, trx, &mtr);
+		dict_drop_index_tree(pcur, trx, &mtr);
 
 		mtr.commit();
 

@@ -323,16 +323,6 @@ buf_block_free(
 /*===========*/
 	buf_block_t*	block);	/*!< in, own: block to be freed */
 
-/*********************************************************************//**
-Copies contents of a buffer frame to a given buffer.
-@return buf */
-UNIV_INLINE
-byte*
-buf_frame_copy(
-/*===========*/
-	byte*			buf,	/*!< in: buffer to copy to */
-	const buf_frame_t*	frame);	/*!< in: buffer frame */
-
 /**************************************************************//**
 NOTE! The following macros should be used instead of buf_page_get_gen,
 to improve debugging. Only values RW_S_LATCH and RW_X_LATCH are allowed
@@ -697,7 +687,6 @@ inline uint buf_page_full_crc32_size(const byte* buf, bool* comp, bool* cr)
 	return page_size;
 }
 
-#ifndef UNIV_INNOCHECKSUM
 # ifdef UNIV_LINUX
 # include <stdlib.h>
 # endif
@@ -726,16 +715,7 @@ inline void aligned_free(void *ptr)
 #endif
 }
 
-/**********************************************************************//**
-Gets the space id, page offset, and byte offset within page of a
-pointer pointing to a buffer frame containing a file page. */
-UNIV_INLINE
-void
-buf_ptr_get_fsp_addr(
-/*=================*/
-	const void*	ptr,	/*!< in: pointer to a buffer frame */
-	ulint*		space,	/*!< out: space id */
-	fil_addr_t*	addr);	/*!< out: page offset and byte offset */
+#ifndef UNIV_INNOCHECKSUM
 /**********************************************************************//**
 Gets the hash value of a block. This can be used in searches in the
 lock hash table.
@@ -1104,9 +1084,9 @@ buf_block_get_frame(
 Gets the compressed page descriptor corresponding to an uncompressed page
 if applicable. */
 #define buf_block_get_page_zip(block) \
-	((block)->page.zip.data ? &(block)->page.zip : NULL)
+	(UNIV_LIKELY_NULL((block)->page.zip.data) ? &(block)->page.zip : NULL)
 #define is_buf_block_get_page_zip(block) \
-        ((block)->page.zip.data != 0)
+        UNIV_LIKELY_NULL((block)->page.zip.data)
 
 #ifdef BTR_CUR_HASH_ADAPT
 /** Get a buffer block from an adaptive hash index pointer.

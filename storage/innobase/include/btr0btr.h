@@ -523,8 +523,28 @@ btr_insert_on_non_leaf_level_func(
 #define btr_insert_on_non_leaf_level(f,i,l,t,m)			\
 	btr_insert_on_non_leaf_level_func(f,i,l,t,__FILE__,__LINE__,m)
 
-/** Sets a record as the predefined minimum record. */
-void btr_set_min_rec_mark(rec_t* rec, mtr_t* mtr) MY_ATTRIBUTE((nonnull));
+/** Set a child page pointer record as the predefined minimum record.
+@tparam has_prev  whether the page is supposed to have a left sibling
+@param[in,out]  rec     leftmost record on a leftmost non-leaf page
+@param[in,out]  block   buffer pool block
+@param[in,out]  mtr     mini-transaction */
+template<bool has_prev= false>
+inline void btr_set_min_rec_mark(rec_t *rec, const buf_block_t &block,
+                                 mtr_t *mtr)
+{
+  ut_ad(block.frame == page_align(rec));
+  ut_ad(!page_is_leaf(block.frame));
+  ut_ad(has_prev == page_has_prev(block.frame));
+
+  rec-= page_rec_is_comp(rec) ? REC_NEW_INFO_BITS : REC_OLD_INFO_BITS;
+
+  if (block.page.zip.data)
+    /* This flag is computed from other contents on a ROW_FORMAT=COMPRESSED
+    page. We are not modifying the compressed page frame at all. */
+    *rec|= REC_INFO_MIN_REC_FLAG;
+  else
+    mtr->write<1>(block, rec, *rec | REC_INFO_MIN_REC_FLAG);
+}
 
 /** Seek to the parent page of a B-tree page.
 @param[in,out]	index	b-tree
@@ -581,15 +601,15 @@ btr_discard_page(
 Parses the redo log record for setting an index record as the predefined
 minimum record.
 @return end of log record or NULL */
+ATTRIBUTE_COLD MY_ATTRIBUTE((nonnull(1,2), warn_unused_result))
 const byte*
 btr_parse_set_min_rec_mark(
 /*=======================*/
 	const byte*	ptr,	/*!< in: buffer */
 	const byte*	end_ptr,/*!< in: buffer end */
 	ulint		comp,	/*!< in: nonzero=compact page format */
-	page_t*		page,	/*!< in: page or NULL */
-	mtr_t*		mtr)	/*!< in: mtr or NULL */
-	MY_ATTRIBUTE((nonnull(1,2), warn_unused_result));
+	buf_block_t*	block,	/*!< in: page or NULL */
+	mtr_t*		mtr);	/*!< in: mtr or NULL */
 /***********************************************************//**
 Parses a redo log record of reorganizing a page.
 @return end of log record or NULL */
