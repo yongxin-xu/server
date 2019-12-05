@@ -20647,8 +20647,7 @@ static TABLE* innodb_find_table_for_vc(THD* thd, dict_table_t* table)
 	char	tbl_buf[NAME_LEN + 1];
 	ulint	db_buf_len, tbl_buf_len;
 
-        if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf,
-                                 &db_buf_len, &tbl_buf_len)) {
+	if (!table->parse_name(db_buf, tbl_buf, &db_buf_len, &tbl_buf_len)) {
 		return NULL;
 	}
 

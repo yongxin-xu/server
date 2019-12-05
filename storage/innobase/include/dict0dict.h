@@ -32,7 +32,6 @@ Created 1/8/1996 Heikki Tuuri
 #include "dict0mem.h"
 #include "fsp0fsp.h"
 #include <deque>
-#include "mysqld.h"
 
 class MDL_ticket;
 extern bool innodb_table_stats_not_found;
@@ -125,26 +124,11 @@ enum dict_table_op_t {
 	DICT_TABLE_OP_OPEN_ONLY_IF_CACHED
 };
 
-
-/** Parse the table file name into table name and database name.
-@param[in]      name            InnoDB table name
-@param[in,out]  mysql_db_name   database name buffer
-@param[in,out]  mysql_tbl_name  table name buffer
-@param[out]     db_name_len     database name length
-@param[out]     tbl_name_len    table name length
-@return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const table_name_t &name,
-                         char (&mysql_db_name)[NAME_LEN + 1],
-                         char (&mysql_tbl_name)[NAME_LEN + 1],
-                         size_t *db_name_len, size_t *tbl_name_len)
-  MY_ATTRIBUTE((nonnull));
-
 /** Acquire MDL shared for the table name.
 @tparam trylock whether to use non-blocking operation
 @param[in,out]  table           table object
 @param[in,out]  thd             background thread
 @param[out]     mdl             mdl ticket
-@param[in]      dict_locked     data dictionary locked
 @param[in]      table_op        operation to perform when opening
 @return table object after locking MDL shared
 @retval NULL if the table is not readable, or if trylock && MDL blocked */
@@ -153,7 +137,6 @@ dict_table_t*
 dict_acquire_mdl_shared(dict_table_t *table,
                         THD *thd,
                         MDL_ticket **mdl,
-                        bool dict_locked= false,
                         dict_table_op_t table_op= DICT_TABLE_OP_NORMAL);
 
 /** Look up a table by numeric identifier.

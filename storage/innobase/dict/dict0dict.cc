@@ -722,22 +722,25 @@ dict_index_get_nth_field_pos(
 }
 
 /** Parse the table file name into table name and database name.
-@param[in]      name            InnoDB table name
-@param[in,out]  mysql_db_name   database name buffer
-@param[in,out]  mysql_tbl_name  table name buffer
-@param[out]     db_name_len     database name length
-@param[out]     tbl_name_len    table name length
-@return true if the table name is parse properly. */
-bool dict_parse_tbl_name(const table_name_t& name,
-                         char (&mysql_db_name)[NAME_LEN + 1],
-                         char (&mysql_tbl_name)[NAME_LEN + 1],
-                         size_t *db_name_len, size_t *tbl_name_len)
+@tparam		dict_locked	whether dict_sys.mutex is being held
+@param[in,out]	db_name		database name buffer
+@param[in,out]	tbl_name	table name buffer
+@param[out]	db_name_len	database name length
+@param[out]	tbl_name_len	table name length
+@return whether the table name is visible to SQL */
+template<bool dict_locked>
+bool dict_table_t::parse_name(char (&db_name)[NAME_LEN + 1],
+                              char (&tbl_name)[NAME_LEN + 1],
+                              size_t *db_name_len, size_t *tbl_name_len) const
 {
-  const size_t db_len= name.dblen();
   char db_buf[MAX_DATABASE_NAME_LEN + 1];
   char tbl_buf[MAX_TABLE_NAME_LEN + 1];
 
-  ut_ad(db_len > 0);
+  if (!dict_locked)
+    mutex_enter(&dict_sys.mutex); /* protect against renaming */
+  else
+    ut_ad(mutex_own(&dict_sys.mutex));
+  const size_t db_len= name.dblen();
   ut_ad(db_len <= MAX_DATABASE_NAME_LEN);
 
   memcpy(db_buf, name.m_name, db_len);
@@ -746,12 +749,13 @@ bool dict_parse_tbl_name(const table_name_t& name,
   size_t tbl_len= strlen(name.m_name + db_len);
   memcpy(tbl_buf, name.m_name + db_len + 1, tbl_len);
   tbl_len--;
+  if (!dict_locked)
+    mutex_exit(&dict_sys.mutex);
 
   *db_name_len= db_len;
   *tbl_name_len= tbl_len;
 
-  filename_to_tablename(db_buf, mysql_db_name,
-                        MAX_DATABASE_NAME_LEN + 1, true);
+  filename_to_tablename(db_buf, db_name, MAX_DATABASE_NAME_LEN + 1, true);
 
   if (tbl_len > TEMP_FILE_PREFIX_LENGTH
       && !strncmp(tbl_buf, TEMP_FILE_PREFIX, TEMP_FILE_PREFIX_LENGTH))
@@ -760,17 +764,19 @@ bool dict_parse_tbl_name(const table_name_t& name,
   if (char* is_part= strchr(tbl_buf, '#'))
     *is_part = '\0';
 
-  filename_to_tablename(tbl_buf, mysql_tbl_name, MAX_TABLE_NAME_LEN + 1,
-                        true);
+  filename_to_tablename(tbl_buf, tbl_name, MAX_TABLE_NAME_LEN + 1, true);
   return true;
 }
+
+template bool
+dict_table_t::parse_name<>(char(&)[NAME_LEN + 1], char(&)[NAME_LEN + 1],
+                           size_t*, size_t*) const;
 
 /** Acquire MDL shared for the table name.
 @tparam trylock whether to use non-blocking operation
 @param[in,out]  table           table object
 @param[in,out]  thd             background thread
 @param[out]     mdl             mdl ticket
-@param[in]      dict_locked     data dictionary locked
 @param[in]      table_op        operation to perform when opening
 @return table object after locking MDL shared
 @retval nullptr if the table is not readable, or if trylock && MDL blocked */
@@ -779,18 +785,29 @@ dict_table_t*
 dict_acquire_mdl_shared(dict_table_t *table,
                         THD *thd,
                         MDL_ticket **mdl,
-                        bool dict_locked,
                         dict_table_op_t table_op)
 {
   if (!table || !mdl)
     return table;
 
-  size_t db_len= dict_get_db_name_len(table->name.m_name);
+  MDL_context *mdl_context= static_cast<MDL_context*>(thd_mdl_context(thd));
+  size_t db_len;
+
+  if (trylock)
+  {
+    mutex_enter(&dict_sys.mutex);
+    db_len= dict_get_db_name_len(table->name.m_name);
+    mutex_exit(&dict_sys.mutex);
+  }
+  else
+  {
+    ut_ad(mutex_own(&dict_sys.mutex));
+    db_len= dict_get_db_name_len(table->name.m_name);
+  }
 
   if (db_len == 0)
     return table; /* InnoDB system tables are not covered by MDL */
 
-  MDL_context *mdl_context= static_cast<MDL_context*>(thd_mdl_context(thd));
   if (!mdl_context)
     return nullptr;
 
@@ -800,8 +817,7 @@ dict_acquire_mdl_shared(dict_table_t *table,
   size_t tbl_len;
   bool unaccessible= false;
 
-  if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf,
-			   &db_len, &tbl_len))
+  if (!table->parse_name<!trylock>(db_buf, tbl_buf, &db_len, &tbl_len))
      /* Intermediate table starts with #sql */
     return table;
 
@@ -823,6 +839,8 @@ is_unaccessible:
   if (unaccessible)
     return nullptr;
 
+  if (!trylock)
+    mutex_exit(&dict_sys.mutex);
   {
     MDL_request request;
     request.init(MDL_key::TABLE, db_buf, tbl_buf, MDL_SHARED, MDL_EXPLICIT);
@@ -838,10 +856,12 @@ is_unaccessible:
       *mdl= request.ticket;
   }
 
-  if (trylock && !*mdl)
+  if (!trylock)
+    mutex_enter(&dict_sys.mutex);
+  else if (!*mdl)
     return nullptr;
 
-  table= dict_table_open_on_id(table_id, dict_locked, table_op);
+  table= dict_table_open_on_id(table_id, !trylock, table_op);
 
   if (!table)
   {
@@ -859,8 +879,7 @@ is_unaccessible:
 
   size_t db1_len, tbl1_len;
 
-  dict_parse_tbl_name(table->name.m_name, db_buf1, tbl_buf1,
-                      &db1_len, &tbl1_len);
+  table->parse_name<!trylock>(db_buf1, tbl_buf1, &db1_len, &tbl1_len);
 
   if (*mdl)
   {
@@ -884,8 +903,7 @@ is_unaccessible:
 }
 
 template dict_table_t*
-dict_acquire_mdl_shared<true>(dict_table_t*, THD*, MDL_ticket**, bool,
-                              dict_table_op_t);
+dict_acquire_mdl_shared<true>(dict_table_t*,THD*,MDL_ticket**,dict_table_op_t);
 
 /** Look up a table by numeric identifier.
 @param[in]      table_id        table identifier
@@ -899,7 +917,7 @@ dict_table_open_on_id(table_id_t table_id, bool dict_locked,
                       dict_table_op_t table_op, THD *thd,
                       MDL_ticket **mdl)
 {
-	dict_table_t*	table;
+	ut_ad(!dict_locked || !thd);
 
 	if (!dict_locked) {
 		mutex_enter(&dict_sys.mutex);
@@ -907,7 +925,7 @@ dict_table_open_on_id(table_id_t table_id, bool dict_locked,
 
 	ut_ad(mutex_own(&dict_sys.mutex));
 
-	table = dict_table_open_on_id_low(
+	dict_table_t* table = dict_table_open_on_id_low(
 		table_id,
 		table_op == DICT_TABLE_OP_LOAD_TABLESPACE
 		? DICT_ERR_IGNORE_RECOVER_LOCK
@@ -920,12 +938,16 @@ dict_table_open_on_id(table_id_t table_id, bool dict_locked,
 	}
 
 	if (!dict_locked) {
+		if (thd) {
+			table = dict_acquire_mdl_shared<false>(
+				table, thd, mdl, table_op);
+		}
+
 		dict_table_try_drop_aborted_and_mutex_exit(
 			table, table_op == DICT_TABLE_OP_DROP_ORPHAN);
 	}
 
-	return dict_acquire_mdl_shared<false>(table, thd, mdl, dict_locked,
-					      table_op);
+	return table;
 }
 
 /********************************************************************//**
