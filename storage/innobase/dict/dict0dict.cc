@@ -37,6 +37,7 @@ Created 1/8/1996 Heikki Tuuri
 #include "fil0fil.h"
 #include <algorithm>
 #include "sql_table.h"
+#include <mysql/service_thd_mdl.h>
 
 /** dummy index for ROW_FORMAT=REDUNDANT supremum and infimum records */
 dict_index_t*	dict_ind_redundant;
@@ -164,6 +165,47 @@ ibool
 dict_lru_validate(void);
 /*===================*/
 #endif /* UNIV_DEBUG */
+
+
+/**
+  Acquire shared metadata lock with explicit duration on a table name.
+  @param thd     current thread
+  @param db      database name
+  @param t       table name
+  @param trylock whether to fail if the request would block
+  @return granted MDL_ticket
+  @retval nullptr       on failure
+*/
+static MY_ATTRIBUTE((nonnull))
+MDL_ticket *acquire_mdl(THD *thd, const char *db, const char *t, bool trylock)
+{
+  MDL_context *mdlc= static_cast<MDL_context*>(thd_mdl_context(thd));
+  ut_ad(mdlc);
+  if (!mdlc)
+    return nullptr;
+
+  MDL_request request;
+  request.init(MDL_key::TABLE, db, t, MDL_SHARED, MDL_EXPLICIT);
+  if (trylock
+      ? mdlc->try_acquire_lock(&request)
+      : mdlc->acquire_lock(&request, thd_lock_wait_timeout(thd)))
+    return nullptr;
+
+  return request.ticket;
+}
+
+
+/**
+  Release a metadata lock.
+  @param thd  session
+  @param mdl  metadata lock
+*/
+static MY_ATTRIBUTE((nonnull)) void release_mdl(THD *thd, MDL_ticket *mdl)
+{
+  if (MDL_context *mdlc= static_cast<MDL_context*>(thd_mdl_context(thd)))
+    mdlc->release_lock(mdl);
+}
+
 
 /* Stream for storing detailed information about the latest foreign key
 and unique key errors. Only created if !srv_read_only_mode */
@@ -767,7 +809,6 @@ bool dict_parse_tbl_name(const char* tbl_name,
   return true;
 }
 
-
 /** Acquire MDL shared for the table name.
 @tparam trylock whether to use non-blocking operation
 @param[in,out]  table           table object
@@ -818,17 +859,11 @@ retry_mdl:
   if (unaccessible)
     return nullptr;
 
-  if (trylock)
-  {
-    if (acquire_shared_table_mdl<true>(thd, db_buf, tbl_buf, mdl))
-      return nullptr;
+  *mdl= acquire_mdl(thd, db_buf, tbl_buf, trylock);
+  if (*mdl)
     mdl_acquire= true;
-  }
-  else
-  {
-    if (!acquire_shared_table_mdl(thd, db_buf, tbl_buf, mdl))
-      mdl_acquire= true;
-  }
+  else if (trylock)
+    return nullptr;
 
   table= dict_table_open_on_id(table_id, dict_locked, table_op);
 

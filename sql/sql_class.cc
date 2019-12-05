@@ -5310,6 +5310,31 @@ extern "C" void thd_wait_end(MYSQL_THD thd)
 
 #endif // INNODB_COMPATIBILITY_HOOKS */
 
+
+/**
+  Read the value of lock_wait_timeout.
+  @param thd   the session, or NULL to read the global value
+  @return the value of lock_wait_timeout
+*/
+extern "C" ulong thd_lock_wait_timeout(MYSQL_THD thd)
+{
+  return thd
+    ? thd->variables.lock_wait_timeout
+    : global_system_variables.lock_wait_timeout;
+}
+
+
+/**
+  MDL_context accessor
+  @param thd   the current session
+  @return pointer to thd->mdl_context
+*/
+extern "C" void *thd_mdl_context(MYSQL_THD thd)
+{
+  return &thd->mdl_context;
+}
+
+
 /****************************************************************************
   Handling of statement states in functions and triggers.
 

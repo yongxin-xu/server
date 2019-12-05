@@ -297,14 +297,11 @@ const char*
 thd_innodb_tmpdir(
 	THD*	thd);
 
-/******************************************************************//**
-Returns the lock wait timeout for the current connection.
-@return the lock wait timeout, in seconds */
-ulong
-thd_lock_wait_timeout(
-/*==================*/
-	THD*	thd);	/*!< in: thread handle, or NULL to query
-			the global innodb_lock_wait_timeout */
+/**
+@param thd     session, or NULL to query the global value
+@return innodb_lock wait timeout */
+ulong thd_innodb_lock_wait_timeout(THD* thd);
+
 /** Get status of innodb_tmpdir.
 @param[in]	thd	thread handle, or NULL to query
 			the global innodb_tmpdir.

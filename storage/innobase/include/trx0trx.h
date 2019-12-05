@@ -419,7 +419,7 @@ from innodb_lock_wait_timeout via trx_t::mysql_thd.
 @return lock wait timeout in seconds */
 #define trx_lock_wait_timeout_get(t)					\
 	((t)->mysql_thd != NULL						\
-	 ? thd_lock_wait_timeout((t)->mysql_thd)			\
+	 ? thd_innodb_lock_wait_timeout((t)->mysql_thd)			\
 	 : 0)
 
 /**

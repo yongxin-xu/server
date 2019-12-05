@@ -3210,46 +3210,6 @@ bool MDL_context::has_explicit_locks()
   return false;
 }
 
-template
-bool acquire_shared_table_mdl<true>(THD *thd, const char *db_name,
-			            const char *tbl_name,
-			            MDL_ticket **out_mdl_ticket);
-template
-bool acquire_shared_table_mdl<false>(THD *thd, const char *db_name,
-			             const char *tbl_name,
-			             MDL_ticket **out_mdl_ticket);
-template<bool no_wait>
-bool acquire_shared_table_mdl(THD *thd, const char *db_name,
-			      const char *tbl_name,
-			      MDL_ticket **out_mdl_ticket)
-{
-  MDL_request mdl_request;
-  mdl_request.init(MDL_key::TABLE, db_name, tbl_name,
-                   MDL_SHARED, MDL_EXPLICIT);
-  if (no_wait)
-  {
-    if (thd->mdl_context.try_acquire_lock(&mdl_request)
-        || !mdl_request.ticket)
-      return true;
-  }
-  else
-  {
-    if (thd->mdl_context.acquire_lock(&mdl_request,
-                                      thd->variables.lock_wait_timeout))
-      return true;
-  }
-
-  if (out_mdl_ticket)
-    *out_mdl_ticket= mdl_request.ticket;
-
-  return false;
-}
-
-void release_mdl(THD *thd, MDL_ticket *mdl_ticket)
-{
-  thd->mdl_context.release_lock(mdl_ticket);
-}
-
 #ifdef WITH_WSREP
 static
 const char *wsrep_get_mdl_namespace_name(MDL_key::enum_mdl_namespace ns)

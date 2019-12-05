@@ -1704,7 +1704,7 @@ lock_rec_enqueue_waiting(
 		ut_ad(0);
 	}
 
-	if (trx->mysql_thd && thd_lock_wait_timeout(trx->mysql_thd) == 0) {
+	if (trx->mysql_thd && !thd_innodb_lock_wait_timeout(trx->mysql_thd)) {
 		trx->error_state = DB_LOCK_WAIT_TIMEOUT;
 		return DB_LOCK_WAIT_TIMEOUT;
 	}
