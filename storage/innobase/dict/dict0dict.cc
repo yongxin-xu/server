@@ -166,47 +166,6 @@ dict_lru_validate(void);
 /*===================*/
 #endif /* UNIV_DEBUG */
 
-
-/**
-  Acquire shared metadata lock with explicit duration on a table name.
-  @param thd     current thread
-  @param db      database name
-  @param t       table name
-  @param trylock whether to fail if the request would block
-  @return granted MDL_ticket
-  @retval nullptr       on failure
-*/
-static MY_ATTRIBUTE((nonnull))
-MDL_ticket *acquire_mdl(THD *thd, const char *db, const char *t, bool trylock)
-{
-  MDL_context *mdlc= static_cast<MDL_context*>(thd_mdl_context(thd));
-  ut_ad(mdlc);
-  if (!mdlc)
-    return nullptr;
-
-  MDL_request request;
-  request.init(MDL_key::TABLE, db, t, MDL_SHARED, MDL_EXPLICIT);
-  if (trylock
-      ? mdlc->try_acquire_lock(&request)
-      : mdlc->acquire_lock(&request, thd_lock_wait_timeout(thd)))
-    return nullptr;
-
-  return request.ticket;
-}
-
-
-/**
-  Release a metadata lock.
-  @param thd  session
-  @param mdl  metadata lock
-*/
-static MY_ATTRIBUTE((nonnull)) void release_mdl(THD *thd, MDL_ticket *mdl)
-{
-  if (MDL_context *mdlc= static_cast<MDL_context*>(thd_mdl_context(thd)))
-    mdlc->release_lock(mdl);
-}
-
-
 /* Stream for storing detailed information about the latest foreign key
 and unique key errors. Only created if !srv_read_only_mode */
 FILE*	dict_foreign_err_file		= NULL;
@@ -404,8 +363,10 @@ dict_table_close(
 		}
 	}
 
-	if (thd && mdl) {
-		release_mdl(thd, mdl);
+	if (!thd || !mdl) {
+	} else if (MDL_context *mdl_context= static_cast<MDL_context*>(
+			   thd_mdl_context(thd))) {
+		mdl_context->release_lock(mdl);
 	}
 }
 
@@ -817,7 +778,7 @@ bool dict_parse_tbl_name(const char* tbl_name,
 @param[in]      dict_locked     data dictionary locked
 @param[in]      table_op        operation to perform when opening
 @return table object after locking MDL shared
-@retval NULL if the table is not readable, or if trylock && MDL blocked */
+@retval nullptr if the table is not readable, or if trylock && MDL blocked */
 template<bool trylock>
 dict_table_t*
 dict_acquire_mdl_shared(dict_table_t *table,
@@ -834,22 +795,28 @@ dict_acquire_mdl_shared(dict_table_t *table,
   if (db_len == 0)
     return table; /* InnoDB system tables are not covered by MDL */
 
+  MDL_context *mdl_context= static_cast<MDL_context*>(thd_mdl_context(thd));
+  if (!mdl_context)
+    return nullptr;
+
   table_id_t table_id= table->id;
   char db_buf[NAME_LEN + 1], db_buf1[NAME_LEN + 1];
   char tbl_buf[NAME_LEN + 1], tbl_buf1[NAME_LEN + 1];
-  bool mdl_acquire= false;
   bool unaccessible= false;
 
   if (!dict_parse_tbl_name(table->name.m_name, db_buf, tbl_buf))
      /* Intermediate table starts with #sql */
     return table;
 
-retry_mdl:
+retry:
   if (!unaccessible && (!table->is_readable() || table->corrupted))
   {
-    if (mdl_acquire)
-      release_mdl(thd, *mdl);
-
+is_unaccessible:
+    if (*mdl)
+    {
+      mdl_context->release_lock(*mdl);
+      *mdl= nullptr;
+    }
     unaccessible= true;
   }
 
@@ -859,46 +826,56 @@ retry_mdl:
   if (unaccessible)
     return nullptr;
 
-  *mdl= acquire_mdl(thd, db_buf, tbl_buf, trylock);
-  if (*mdl)
-    mdl_acquire= true;
-  else if (trylock)
+  {
+    MDL_request request;
+    request.init(MDL_key::TABLE, db_buf, tbl_buf, MDL_SHARED, MDL_EXPLICIT);
+    if (trylock
+        ? mdl_context->try_acquire_lock(&request)
+        : mdl_context->acquire_lock(&request, thd_lock_wait_timeout(thd)))
+    {
+      *mdl= nullptr;
+      if (trylock)
+        return nullptr;
+    }
+    else
+      *mdl= request.ticket;
+  }
+
+  if (trylock && !*mdl)
     return nullptr;
 
   table= dict_table_open_on_id(table_id, dict_locked, table_op);
 
   if (!table)
   {
-    /* Table is dropped */
-    if (mdl_acquire)
-      release_mdl(thd, *mdl);
-
-    *mdl= nullptr;
+    /* The table was dropped. */
+    if (*mdl)
+    {
+      mdl_context->release_lock(*mdl);
+      *mdl= nullptr;
+    }
     return nullptr;
   }
 
   if (!fil_table_accessible(table))
-  {
-    if (mdl_acquire)
-      release_mdl(thd, *mdl);
-
-    unaccessible= true;
-    goto retry_mdl;
-  }
+    goto is_unaccessible;
 
   dict_parse_tbl_name(table->name.m_name, db_buf1, tbl_buf1);
 
-  if (mdl_acquire && !strcmp(db_buf, db_buf1) && !strcmp(tbl_buf, tbl_buf1))
-    return table;
+  if (*mdl)
+  {
+    if (!strcmp(db_buf, db_buf1) && !strcmp(tbl_buf, tbl_buf1))
+      return table;
 
-  /* Table is renamed. so release mdl lock for old name and
-  try to acquire the MDL for the new table name. */
-  if (mdl_acquire)
-    release_mdl(thd, *mdl);
+    /* The table was renamed. Release MDL for the old name and
+    try to acquire MDL for the new name. */
+    mdl_context->release_lock(*mdl);
+    *mdl= nullptr;
+  }
 
   strcpy(tbl_buf, tbl_buf1);
   strcpy(db_buf, db_buf1);
-  goto retry_mdl;
+  goto retry;
 }
 
 template dict_table_t*
