@@ -13200,14 +13200,6 @@ ha_innobase::create(
 		DBUG_RETURN(error);
 	}
 
-	DBUG_EXECUTE_IF("create_table_fail",
-			if (trx)
-			{
-			  trx_rollback_for_mysql(trx);
-			  row_mysql_unlock_data_dictionary(trx);
-			}
-			DBUG_RETURN(DB_ERROR););
-
 	const bool own_trx = !trx;
 
 	if (own_trx) {
@@ -13842,7 +13834,6 @@ int ha_innobase::truncate()
 		trx_rollback_for_mysql(trx);
 		row_mysql_unlock_data_dictionary(trx);
 	} else {
-		DEBUG_SYNC_C("rename_table_during_truncate");
 		switch (dict_tf_get_rec_format(ib_table->flags)) {
 		case REC_FORMAT_REDUNDANT:
 			info.row_type = ROW_TYPE_REDUNDANT;
