@@ -6871,8 +6871,8 @@ static int get_schema_constraints_record(THD *thd, TABLE_LIST *tables,
 
     if (show_table->s->foreign_keys)
     {
-      FOREIGN_KEY_INFO *f_key_info;
-      List_iterator_fast<FOREIGN_KEY_INFO> it(*show_table->s->foreign_keys);
+      FK_info *f_key_info;
+      List_iterator_fast<FK_info> it(*show_table->s->foreign_keys);
       while ((f_key_info=it++))
       {
         if (store_constraints(thd, table, db_name, table_name,
@@ -7059,13 +7059,13 @@ static int get_schema_key_column_usage_record(THD *thd,
 
     if (show_table->s->foreign_keys)
     {
-      FOREIGN_KEY_INFO *f_key_info;
-      List_iterator_fast<FOREIGN_KEY_INFO> fkey_it(*show_table->s->foreign_keys);
+      FK_info *f_key_info;
+      List_iterator_fast<FK_info> fkey_it(*show_table->s->foreign_keys);
       while ((f_key_info= fkey_it++))
       {
         LEX_CSTRING *f_info;
         LEX_CSTRING *r_info;
-        List_iterator_fast<LEX_CSTRING> it(f_key_info->foreign_fields),
+        List_iterator_fast<Lex_cstring> it(f_key_info->foreign_fields),
           it1(f_key_info->referenced_fields);
         uint f_idx= 0;
         while ((f_info= it++))
@@ -7808,8 +7808,8 @@ get_referential_constraints_record(THD *thd, TABLE_LIST *tables,
                            HA_STATUS_NO_LOCK |
                            HA_STATUS_TIME);
 
-    FOREIGN_KEY_INFO *f_key_info;
-    List_iterator_fast<FOREIGN_KEY_INFO> it(*show_table->s->foreign_keys);
+    FK_info *f_key_info;
+    List_iterator_fast<FK_info> it(*show_table->s->foreign_keys);
     while ((f_key_info= it++))
     {
       restore_record(table, s->default_values);

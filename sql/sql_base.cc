@@ -4689,8 +4689,8 @@ handle_table(THD *thd, Query_tables_list *prelocking_ctx,
 
     if (table->s->referenced_by_foreign_key())
     {
-      List_iterator<FOREIGN_KEY_INFO> fk_list_it(*table->s->referenced_keys);
-      FOREIGN_KEY_INFO *fk;
+      List_iterator<FK_info> fk_list_it(*table->s->referenced_keys);
+      FK_info *fk;
       Query_arena *arena, backup;
 
       arena= thd->activate_stmt_arena_if_needed(&backup);

@@ -6255,8 +6255,8 @@ drop_create_field:
         }
         else if (table->s->foreign_keys)
         {
-          FOREIGN_KEY_INFO *f_key;
-          List_iterator<FOREIGN_KEY_INFO> fk_key_it(*table->s->foreign_keys);
+          FK_info *f_key;
+          List_iterator<FK_info> fk_key_it(*table->s->foreign_keys);
           while ((f_key= fk_key_it++))
           {
             if (my_strcasecmp(system_charset_info, f_key->foreign_id->str,
@@ -8863,11 +8863,11 @@ enum fk_column_change_type
 
 static enum fk_column_change_type
 fk_check_column_changes(THD *thd, Alter_info *alter_info,
-                        List<LEX_CSTRING> &fk_columns,
+                        List<Lex_cstring> &fk_columns,
                         const char **bad_column_name)
 {
-  List_iterator_fast<LEX_CSTRING> column_it(fk_columns);
-  LEX_CSTRING *column;
+  List_iterator_fast<Lex_cstring> column_it(fk_columns);
+  Lex_cstring *column;
 
   *bad_column_name= NULL;
 

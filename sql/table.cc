@@ -9343,20 +9343,19 @@ bool TABLE_SHARE::update_foreign_keys(THD *thd, Alter_info *alter_info)
       foreign_keys->empty();
     }
 
-    FOREIGN_KEY_INFO *dst= (FOREIGN_KEY_INFO *) alloc_root(
-      &mem_root, sizeof(FOREIGN_KEY_INFO));
-    if (unlikely(foreign_keys->push_back(dst)))
+    FK_info *dst= new (&mem_root) FK_info (&mem_root);
+    if (unlikely(!dst || foreign_keys->push_back(dst)))
     {
       my_error(ER_OUT_OF_RESOURCES, MYF(0));
       thd->mem_root= old_root;
       return true;
     }
-    dst->foreign_id= &src->constraint_name;
-    dst->foreign_db= &db;
-    dst->foreign_table= &table_name;
-    dst->referenced_key_name= &src->name;
-    dst->referenced_db= src->ref_db.str ? &src->ref_db : &db;
-    dst->referenced_table= &src->ref_table;
+    dst->foreign_id->strdup(&mem_root, src->constraint_name);
+    dst->foreign_db->strdup(&mem_root, db);
+    dst->foreign_table->strdup(&mem_root, table_name);
+    dst->referenced_key_name->strdup(&mem_root, src->name);
+    dst->referenced_db->strdup(&mem_root, src->ref_db.str ? src->ref_db : db);
+    dst->referenced_table->strdup(&mem_root, src->ref_table);
     dst->update_method= src->update_opt;
     dst->delete_method= src->delete_opt;
     dst->foreign_fields.empty();
@@ -9366,7 +9365,10 @@ bool TABLE_SHARE::update_foreign_keys(THD *thd, Alter_info *alter_info)
     List_iterator_fast<Key_part_spec> col_it(src->columns);
     while ((col= col_it++))
     {
-      if (unlikely(dst->foreign_fields.push_back(&col->field_name)))
+      Lex_cstring *field_name= new (&mem_root) Lex_cstring;
+      if (unlikely(!field_name ||
+                   field_name->strdup(&mem_root, col->field_name) ||
+                   dst->foreign_fields.push_back(field_name)))
       {
         my_error(ER_OUT_OF_RESOURCES, MYF(0));
         thd->mem_root= old_root;
@@ -9377,7 +9379,10 @@ bool TABLE_SHARE::update_foreign_keys(THD *thd, Alter_info *alter_info)
     col_it.init(src->ref_columns);
     while ((col= col_it++))
     {
-      if (unlikely(dst->referenced_fields.push_back(&col->field_name)))
+      Lex_cstring *field_name= new (&mem_root) Lex_cstring;
+      if (unlikely(!field_name ||
+                   field_name->strdup(&mem_root, col->field_name) ||
+                   dst->referenced_fields.push_back(field_name)))
       {
         my_error(ER_OUT_OF_RESOURCES, MYF(0));
         thd->mem_root= old_root;
@@ -9582,14 +9587,14 @@ bool TABLE_SHARE::check_foreign_keys(THD *thd)
         if (!cmp(fk->referenced_db, &db) && !cmp(fk->referenced_table, &table_name))
         {
           found_table= true;
-          List_iterator_fast<LEX_CSTRING> rk_fld_it(rk->referenced_fields);
-          List_iterator_fast<LEX_CSTRING> fk_fld_it(fk->referenced_fields);
-          List_iterator_fast<LEX_CSTRING> rk_fld2_it(rk->foreign_fields);
-          List_iterator_fast<LEX_CSTRING> fk_fld2_it(fk->foreign_fields);
-          LEX_CSTRING *fk_fld;
+          List_iterator_fast<Lex_cstring> rk_fld_it(rk->referenced_fields);
+          List_iterator_fast<Lex_cstring> fk_fld_it(fk->referenced_fields);
+          List_iterator_fast<Lex_cstring> rk_fld2_it(rk->foreign_fields);
+          List_iterator_fast<Lex_cstring> fk_fld2_it(fk->foreign_fields);
+          Lex_cstring *fk_fld;
           while ((fk_fld= fk_fld_it++))
           {
-            LEX_CSTRING *rk_fld= rk_fld_it++;
+            Lex_cstring *rk_fld= rk_fld_it++;
             if (!rk_fld || cmp(fk_fld, rk_fld))
               break;
             fk_fld= fk_fld2_it++;
@@ -9653,14 +9658,14 @@ bool TABLE_SHARE::check_foreign_keys(THD *thd)
         if (!cmp(rk->foreign_db, &db) && !cmp(rk->foreign_table, &table_name))
         {
           found_table= true;
-          List_iterator_fast<LEX_CSTRING> rk_fld_it(rk->referenced_fields);
-          List_iterator_fast<LEX_CSTRING> fk_fld_it(fk->referenced_fields);
-          List_iterator_fast<LEX_CSTRING> rk_fld2_it(rk->foreign_fields);
-          List_iterator_fast<LEX_CSTRING> fk_fld2_it(fk->foreign_fields);
-          LEX_CSTRING *fk_fld;
+          List_iterator_fast<Lex_cstring> rk_fld_it(rk->referenced_fields);
+          List_iterator_fast<Lex_cstring> fk_fld_it(fk->referenced_fields);
+          List_iterator_fast<Lex_cstring> rk_fld2_it(rk->foreign_fields);
+          List_iterator_fast<Lex_cstring> fk_fld2_it(fk->foreign_fields);
+          Lex_cstring *fk_fld;
           while ((fk_fld= fk_fld_it++))
           {
-            LEX_CSTRING *rk_fld= rk_fld_it++;
+            Lex_cstring *rk_fld= rk_fld_it++;
             if (!rk_fld || cmp(fk_fld, rk_fld))
               break;
             fk_fld= fk_fld2_it++;

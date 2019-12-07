@@ -40,11 +40,11 @@
 */
 
 static bool fk_info_append_fields(THD *thd, String *str,
-                                  List<LEX_CSTRING> *fields)
+                                  List<Lex_cstring> *fields)
 {
   bool res= FALSE;
-  LEX_CSTRING *field;
-  List_iterator_fast<LEX_CSTRING> it(*fields);
+  Lex_cstring *field;
+  List_iterator_fast<Lex_cstring> it(*fields);
 
   while ((field= it++))
   {

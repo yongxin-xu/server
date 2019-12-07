@@ -1678,19 +1678,42 @@ enum enum_schema_table_state
 enum enum_fk_option { FK_OPTION_UNDEF, FK_OPTION_RESTRICT, FK_OPTION_CASCADE,
                FK_OPTION_SET_NULL, FK_OPTION_NO_ACTION, FK_OPTION_SET_DEFAULT};
 
-typedef struct st_foreign_key_info
+class FK_info : public Sql_alloc
 {
-  LEX_CSTRING *foreign_id;
-  LEX_CSTRING *foreign_db;
-  LEX_CSTRING *foreign_table;
-  LEX_CSTRING *referenced_db;
-  LEX_CSTRING *referenced_table;
+public:
+  Lex_cstring *foreign_id;
+  Lex_cstring *foreign_db;
+  Lex_cstring *foreign_table;
+  Lex_cstring *referenced_db;
+  Lex_cstring *referenced_table;
   enum_fk_option update_method;
   enum_fk_option delete_method;
-  LEX_CSTRING *referenced_key_name;
-  List<LEX_CSTRING> foreign_fields;
-  List<LEX_CSTRING> referenced_fields;
-} FOREIGN_KEY_INFO;
+  Lex_cstring *referenced_key_name;
+  List<Lex_cstring> foreign_fields;
+  List<Lex_cstring> referenced_fields;
+
+public:
+  FK_info(MEM_ROOT *mem_root)
+  {
+    foreign_id= new (mem_root) Lex_cstring;
+    foreign_db= new (mem_root) Lex_cstring;
+    foreign_table= new (mem_root) Lex_cstring;
+    referenced_db= new (mem_root) Lex_cstring;
+    referenced_table= new (mem_root) Lex_cstring;
+    referenced_key_name= new (mem_root) Lex_cstring;
+  }
+  ~FK_info()
+  {
+    delete foreign_id;
+    delete foreign_db;
+    delete foreign_table;
+    delete referenced_db;
+    delete referenced_table;
+    delete referenced_key_name;
+  }
+};
+
+typedef class FK_info FOREIGN_KEY_INFO;
 
 LEX_CSTRING *fk_option_name(enum_fk_option opt);
 bool fk_modifies_child(enum_fk_option opt);
