@@ -225,7 +225,9 @@ struct TTASFutexMutex {
 				return;
 			}
 
-			ut_delay(ut_rnd_interval(0, max_delay));
+			if (max_delay) {
+				ut_delay(ut_rnd_interval(max_delay));
+			}
 		}
 
 		for (n_waits= 0;; n_waits++) {
@@ -362,7 +364,9 @@ struct TTASMutex {
 		uint32_t n_spins = 0;
 
 		while (!try_lock()) {
-			ut_delay(ut_rnd_interval(0, max_delay));
+			if (max_delay) {
+				ut_delay(ut_rnd_interval(max_delay));
+			}
 			if (++n_spins == max_spins) {
 				os_thread_yield();
 				max_spins+= step;
@@ -515,8 +519,8 @@ struct TTASEventMutex {
 				} else {
 					sync_array_wait_event(sync_arr, cell);
 				}
-			} else {
-				ut_delay(ut_rnd_interval(0, max_delay));
+			} else if (max_delay) {
+				ut_delay(ut_rnd_interval(max_delay));
 			}
 		}
 

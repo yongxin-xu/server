@@ -1746,8 +1746,9 @@ dict_stats_analyze_index_for_n_prefix(
 		/* we do not pass (left, right) because we do not want to ask
 		ut_rnd_interval() to work with too big numbers since
 		ib_uint64_t could be bigger than ulint */
-		const ulint	rnd = ut_rnd_interval(
-			0, static_cast<ulint>(right - left));
+		const ulint	rnd = left == right
+			? 0
+			: ut_rnd_interval(static_cast<ulint>(right - left));
 
 		const ib_uint64_t	dive_below_idx
 			= boundaries->at(static_cast<unsigned>(left + rnd));
