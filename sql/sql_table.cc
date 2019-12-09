@@ -6563,25 +6563,38 @@ Compare_keys compare_keys_but_name(const KEY *table_key, const KEY *new_key,
                                    const KEY *const new_pk,
                                    const KEY *const old_pk)
 {
-  Compare_keys result= Compare_keys::Equal;
+  if (table_key->algorithm != new_key->algorithm)
+    return Compare_keys::NotEqual;
 
-  if ((table_key->algorithm != new_key->algorithm) ||
-      ((table_key->flags & HA_KEYFLAG_MASK) !=
-       (new_key->flags & HA_KEYFLAG_MASK)) ||
-      (table_key->user_defined_key_parts != new_key->user_defined_key_parts))
+  if ((table_key->flags & HA_KEYFLAG_MASK) !=
+      (new_key->flags & HA_KEYFLAG_MASK))
+    return Compare_keys::NotEqual;
+
+  if (table_key->user_defined_key_parts != new_key->user_defined_key_parts)
     return Compare_keys::NotEqual;
 
   if (table_key->block_size != new_key->block_size)
+    return Compare_keys::NotEqual;
+
+  /*
+  Rebuild the index if following condition get satisfied:
+
+  (i) Old table doesn't have primary key, new table has it and vice-versa
+  (ii) Primary key changed to another existing index
+  */
+  if ((new_key == new_pk) != (table_key == old_pk))
     return Compare_keys::NotEqual;
 
   if (engine_options_differ(table_key->option_struct, new_key->option_struct,
                             table->file->ht->index_options))
     return Compare_keys::NotEqual;
 
-  const KEY_PART_INFO *end=
-      table_key->key_part + table_key->user_defined_key_parts;
-  for (const KEY_PART_INFO *key_part= table_key->key_part,
-                           *new_part= new_key->key_part;
+  Compare_keys result= Compare_keys::Equal;
+
+  for (const KEY_PART_INFO *
+           key_part= table_key->key_part,
+          *new_part= new_key->key_part,
+          *end= table_key->key_part + table_key->user_defined_key_parts;
        key_part < end; key_part++, new_part++)
   {
     /*
@@ -6591,8 +6604,11 @@ Compare_keys compare_keys_but_name(const KEY *table_key, const KEY *new_key,
     */
     const Create_field &new_field=
         *alter_info->create_list.elem(new_part->fieldnr);
-    if (!new_field.field ||
-        new_field.field->field_index != key_part->fieldnr - 1)
+
+    if (!new_field.field)
+      return Compare_keys::NotEqual;
+
+    if (new_field.field->field_index != key_part->fieldnr - 1)
       return Compare_keys::NotEqual;
 
     switch (table->file->compare_key_parts(
@@ -6607,20 +6623,10 @@ Compare_keys compare_keys_but_name(const KEY *table_key, const KEY *new_key,
       result= Compare_keys::EqualButKeyPartLength;
       break;
     case Compare_keys::EqualButComment:
-      DBUG_ASSERT(result != Compare_keys::EqualButKeyPartLength);
-      result= Compare_keys::EqualButComment;
+      DBUG_ASSERT(false); /* engine should not return this */
       break;
     }
   }
-
-  /*
-  Rebuild the index if following condition get satisfied:
-
-  (i) Old table doesn't have primary key, new table has it and vice-versa
-  (ii) Primary key changed to another existing index
-*/
-  if ((new_key == new_pk) != (table_key == old_pk))
-    return Compare_keys::NotEqual;
 
   /* Check that key comment is not changed. */
   if (cmp(table_key->comment, new_key->comment) != 0)
