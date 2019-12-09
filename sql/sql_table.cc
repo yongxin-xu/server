@@ -6558,6 +6558,31 @@ static int compare_uint(const uint *s, const uint *t)
   return (*s < *t) ? -1 : ((*s > *t) ? 1 : 0);
 }
 
+Compare_keys merge(Compare_keys current, Compare_keys add) {
+  if (current == Compare_keys::Equal)
+    return add;
+
+  if (add == Compare_keys::Equal)
+    return current;
+
+  if (current == add)
+    return current;
+
+  if (current == Compare_keys::EqualButComment) {
+    return Compare_keys::NotEqual;
+  }
+
+  if (current == Compare_keys::EqualButKeyPartLength) {
+    if (add == Compare_keys::EqualButComment)
+      return Compare_keys::NotEqual;
+    DBUG_ASSERT(add == Compare_keys::NotEqual);
+    return Compare_keys::NotEqual;
+  }
+
+  DBUG_ASSERT(current == Compare_keys::NotEqual);
+  return current;
+}
+
 Compare_keys compare_keys_but_name(const KEY *table_key, const KEY *new_key,
                                    Alter_info *alter_info, const TABLE *table,
                                    const KEY *const new_pk,
@@ -6611,30 +6636,14 @@ Compare_keys compare_keys_but_name(const KEY *table_key, const KEY *new_key,
     if (new_field.field->field_index != key_part->fieldnr - 1)
       return Compare_keys::NotEqual;
 
-    switch (table->file->compare_key_parts(
-        *table->field[key_part->fieldnr - 1], new_field, *key_part, *new_part))
-    {
-    case Compare_keys::Equal:
-      break;
-    case Compare_keys::NotEqual:
-      return Compare_keys::NotEqual;
-    case Compare_keys::EqualButKeyPartLength:
-      DBUG_ASSERT(result != Compare_keys::EqualButComment);
-      result= Compare_keys::EqualButKeyPartLength;
-      break;
-    case Compare_keys::EqualButComment:
-      DBUG_ASSERT(false); /* engine should not return this */
-      break;
-    }
+    auto compare= table->file->compare_key_parts(
+        *table->field[key_part->fieldnr - 1], new_field, *key_part, *new_part);
+    result= merge(result, compare);
   }
 
   /* Check that key comment is not changed. */
   if (cmp(table_key->comment, new_key->comment) != 0)
-  {
-    if (result != Compare_keys::Equal)
-      return Compare_keys::NotEqual;
-    result= Compare_keys::EqualButComment;
-  }
+    result= merge(result, Compare_keys::EqualButComment);
 
   return result;
 }
